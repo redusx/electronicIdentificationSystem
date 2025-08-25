@@ -83,5 +83,8 @@ dependencies {
     //implementation("org.openpnp:opencv:4.9.0-0")
     implementation("org.opencv:opencv:4.9.0")
 
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+
+
 
 }

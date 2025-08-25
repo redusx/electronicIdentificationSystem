@@ -2,7 +2,6 @@ package com.example.countercamtest
 
 import android.Manifest
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -132,6 +131,7 @@ private fun ContourScreen() {
 
     Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        ScannerScreen()
         Canvas(Modifier.fillMaxSize()) {
             if (segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
                 val scale = max(size.width / srcWidth.toFloat(), size.height / srcHeight.toFloat())
