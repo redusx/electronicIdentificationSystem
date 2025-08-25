@@ -65,9 +65,14 @@ private fun ContourScreen() {
 
     val analyzerParams = remember {
         ContourAnalyzer.Params(
-            cannyThreshold1 = 50.0,
-            cannyThreshold2 = 150.0,
-            minContourArea = 50.0
+            // Canny eşik değerlerini birbirine daha yakın ve daha düşük tutuyoruz.
+            // Bu, daha fazla detay (zayıf kenarlar dahil) yakalamamızı sağlar.
+            cannyThreshold1 = 60.0,
+            cannyThreshold2 = 120.0,
+
+            // Çok küçük gürültüleri filtrelemek için minimum alan.
+            // Yazı karakterlerinin parçalarını atmamak için çok yükseltme.
+            minContourArea = 5.0
         )
     }
 
