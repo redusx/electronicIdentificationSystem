@@ -1,10 +1,11 @@
 package com.example.countercamtest
 
+import androidx.camera.core.Camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FlashOn
@@ -26,12 +27,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.max
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.RoundRect as ComposeRoundRect
 
 @Composable
-fun ScannerScreen() {
+fun ScannerScreen(
+    camera: Camera?,
+    segments: FloatArray? = null,
+    srcWidth: Int = 0,
+    srcHeight: Int = 0) {
     var flashEnabled by remember { mutableStateOf(false) }
 
-    // 👇 Tarama animasyonu offset (0f..1f arası sürekli ileri geri döngü)
+    //Tarama animasyonu offset (0f..1f arası sürekli ileri geri döngü)
     val scanAnimation = rememberInfiniteTransition(label = "scan_animation")
     val scanOffset by scanAnimation.animateFloat(
         initialValue = 0f,
@@ -56,13 +65,18 @@ fun ScannerScreen() {
                     .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                RotatedCardContainer(scanOffset = scanOffset)
+                RotatedCardContainer(scanOffset = scanOffset,
+                    segments = segments,   // MainActivity’de OpenCV’den gelen dizi
+                    srcWidth = srcWidth,   // OpenCV kaynağının genişliği
+                    srcHeight = srcHeight)  // OpenCV kaynağının yüksekliği
             }
 
             BottomControls(
-                flashEnabled = flashEnabled,
-                onFlashToggle = { flashEnabled = !flashEnabled },
-                onCapture = { /* TODO: Capture action */ }
+                flashEnabled = !flashEnabled,
+                onFlashToggle = {
+                    flashEnabled = !flashEnabled
+                    camera?.cameraControl?.enableTorch(flashEnabled)
+                }
             )
         }
     }
@@ -71,6 +85,9 @@ fun ScannerScreen() {
 @Composable
 private fun RotatedCardContainer(
     scanOffset: Float,
+    segments: FloatArray? = null,   // <-- eklendi
+    srcWidth: Int = 0,              // <-- eklendi
+    srcHeight: Int = 0
 ) {
     val configuration = LocalConfiguration.current
     val screenHeight = configuration.screenHeightDp.dp
@@ -83,6 +100,9 @@ private fun RotatedCardContainer(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CardCanvas(
                 scanOffset = scanOffset,
+                segments = segments,   // MainActivity’de OpenCV’den gelen dizi
+                srcWidth = srcWidth,   // OpenCV kaynağının genişliği
+                srcHeight = srcHeight  // OpenCV kaynağının yüksekliği
             )
             Spacer(modifier = Modifier.height(15.dp))
             Text(text = "TC Kimlik Kartı Arka Yüzünü Hizalayın", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
@@ -93,7 +113,10 @@ private fun RotatedCardContainer(
 
 @Composable
 fun CardCanvas(
-    scanOffset: Float
+    scanOffset: Float,
+    segments: FloatArray? = null,   // <-- eklendi
+    srcWidth: Int = 0,              // <-- eklendi
+    srcHeight: Int = 0
 ) {
     Box(
         modifier = Modifier.fillMaxWidth().scale(1.2f).aspectRatio(1.586f)
@@ -101,21 +124,57 @@ fun CardCanvas(
         Canvas(modifier = Modifier.fillMaxSize()) {
             val cardWidth = size.width
             val cardHeight = size.height
+            val corner = CornerRadius(cardHeight * 0.05f)
 
             // --- card rectangle ---
             drawRoundRect(
                 color = Color.Black.copy(alpha = 0.2f),
                 size = size,
-                cornerRadius = CornerRadius(cardHeight * 0.05f))
+                cornerRadius = corner)
             drawRoundRect(
                 color = Color.White,
                 size = size,
-                cornerRadius = CornerRadius(cardHeight * 0.05f),
+                cornerRadius = corner,
                 style = Stroke(width = 1.dp.toPx()))
             drawChipArea(cardWidth, cardHeight)
             drawMRZArea(cardWidth, cardHeight)
             drawScanningAnimation(cardWidth, cardHeight, scanOffset)
 
+            // --- SADECE KART ALANI İÇİNE ÇİZ: clipPath ---
+            val roundedPath = Path().apply {
+                addRoundRect(
+                    ComposeRoundRect(
+                        left = 0f,
+                        top = 0f,
+                        right = cardWidth,
+                        bottom = cardHeight,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                            x = corner.x,
+                            y = corner.y
+                        )
+                    )
+                )
+            }
+
+            clipPath(roundedPath) {
+                // Contour çizimleri: SADECE kart alanında
+                if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
+                    val scale = max(cardWidth / srcWidth.toFloat(), cardHeight / srcHeight.toFloat())
+                    val dx = (cardWidth - srcWidth * scale) / 2f
+                    val dy = (cardHeight - srcHeight * scale) / 2f
+
+                    fun map(x: Float, y: Float) = Offset(x * scale + dx, y * scale + dy)
+
+                    var i = 0
+                    val stroke = 2.dp.toPx()
+                    while (i + 3 < segments.size) {
+                        val p1 = map(segments[i],     segments[i + 1])
+                        val p2 = map(segments[i + 2], segments[i + 3])
+                        drawLine(Color.Red, p1, p2, strokeWidth = stroke)
+                        i += 4
+                    }
+                }
+            }
         }
     }
 }
@@ -124,42 +183,27 @@ fun CardCanvas(
 @Composable
 fun BottomControls(
     flashEnabled: Boolean,
-    onFlashToggle: () -> Unit,
-    onCapture: () -> Unit
+    onFlashToggle: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 32.dp, top = 16.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
             onClick = onFlashToggle,
             modifier = Modifier
-                .size(48.dp)
+                .size(64.dp)
                 .background(Color.Black.copy(alpha = 0.5f), CircleShape)
         ) {
             Icon(
                 imageVector = Icons.Default.FlashOn,
                 contentDescription = "Flash",
-                tint = if (flashEnabled) Color.Yellow else Color.White
+                tint = if (flashEnabled) Color.White else Color.Yellow
             )
         }
-        Button(
-            onClick = onCapture,
-            modifier = Modifier.size(64.dp),
-            shape = CircleShape,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(Color.Gray.copy(alpha = 0.3f), CircleShape)
-                    .border(2.dp, Color.Gray, CircleShape)
-            )
-        }
-        Spacer(modifier = Modifier.size(48.dp))
     }
 }
 

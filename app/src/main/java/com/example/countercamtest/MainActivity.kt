@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -91,6 +92,7 @@ private fun ContourScreen() {
     var fps by remember { mutableStateOf(0.0) }
 
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    var camera by remember { mutableStateOf<Camera?>(null) }
 
     val analyzer = remember {
         ContourAnalyzer(
@@ -121,32 +123,39 @@ private fun ContourScreen() {
             }
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
         cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
+        val boundCamera = cameraProvider.bindToLifecycle(
             lifecycleOwner,
             cameraSelector,
             preview,
             imageAnalysis
         )
+        mainExecutor.execute {
+            camera = boundCamera
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-        ScannerScreen()
-        Canvas(Modifier.fillMaxSize()) {
-            if (segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
-                val scale = max(size.width / srcWidth.toFloat(), size.height / srcHeight.toFloat())
-                val dx = (size.width - srcWidth * scale) / 2f
-                val dy = (size.height - srcHeight * scale) / 2f
-                fun map(x: Float, y: Float) = Offset(x * scale + dx, y * scale + dy)
-                var i = 0
-                while (i + 3 < segments.size) {
-                    val p1 = map(segments[i], segments[i + 1])
-                    val p2 = map(segments[i + 2], segments[i + 3])
-                    drawLine(Color.Red, p1, p2, strokeWidth = 2f)
-                    i += 4
-                }
-            }
-        }
+        ScannerScreen(
+            camera = camera,
+            segments = segments,   // MainActivity’de OpenCV’den gelen dizi
+            srcWidth = srcWidth,   // OpenCV kaynağının genişliği
+            srcHeight = srcHeight)
+//        Canvas(Modifier.fillMaxSize()) {
+//            if (segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
+//                val scale = max(size.width / srcWidth.toFloat(), size.height / srcHeight.toFloat())
+//                val dx = (size.width - srcWidth * scale) / 2f
+//                val dy = (size.height - srcHeight * scale) / 2f
+//                fun map(x: Float, y: Float) = Offset(x * scale + dx, y * scale + dy)
+//                var i = 0
+//                while (i + 3 < segments.size) {
+//                    val p1 = map(segments[i], segments[i + 1])
+//                    val p2 = map(segments[i + 2], segments[i + 3])
+//                    drawLine(Color.Red, p1, p2, strokeWidth = 2f)
+//                    i += 4
+//                }
+//            }
+//        }
         Box(
             Modifier
                 .align(Alignment.TopStart)
