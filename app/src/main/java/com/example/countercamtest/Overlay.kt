@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -21,8 +20,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -40,7 +37,6 @@ fun ScannerScreen(
     srcHeight: Int = 0) {
     var flashEnabled by remember { mutableStateOf(false) }
 
-    //Tarama animasyonu offset (0f..1f arası sürekli ileri geri döngü)
     val scanAnimation = rememberInfiniteTransition(label = "scan_animation")
     val scanOffset by scanAnimation.animateFloat(
         initialValue = 0f,
@@ -57,22 +53,22 @@ fun ScannerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                RotatedCardContainer(scanOffset = scanOffset,
-                    segments = segments,   // MainActivity’de OpenCV’den gelen dizi
-                    srcWidth = srcWidth,   // OpenCV kaynağının genişliği
-                    srcHeight = srcHeight)  // OpenCV kaynağının yüksekliği
-            }
+            Spacer(modifier = Modifier.weight(0.5f))
+
+            CardOverlayContainer(
+                scanOffset = scanOffset,
+                segments = segments,
+                srcWidth = srcWidth,
+                srcHeight = srcHeight
+            )
+
+            Spacer(modifier = Modifier.weight(0.5f))
 
             BottomControls(
-                flashEnabled = !flashEnabled,
+                flashEnabled = flashEnabled,
                 onFlashToggle = {
                     flashEnabled = !flashEnabled
                     camera?.cameraControl?.enableTorch(flashEnabled)
@@ -83,50 +79,72 @@ fun ScannerScreen(
 }
 
 @Composable
-private fun RotatedCardContainer(
+private fun CardOverlayContainer(
     scanOffset: Float,
-    segments: FloatArray? = null,   // <-- eklendi
-    srcWidth: Int = 0,              // <-- eklendi
+    segments: FloatArray? = null,
+    srcWidth: Int = 0,
     srcHeight: Int = 0
 ) {
-    val configuration = LocalConfiguration.current
-    val screenHeight = configuration.screenHeightDp.dp
-    val screenWidth = configuration.screenWidthDp.dp
-
-    Box(
-        modifier = Modifier.width(screenHeight).height(screenWidth).graphicsLayer { rotationZ = 90f },
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CardCanvas(
-                scanOffset = scanOffset,
-                segments = segments,   // MainActivity’de OpenCV’den gelen dizi
-                srcWidth = srcWidth,   // OpenCV kaynağının genişliği
-                srcHeight = srcHeight  // OpenCV kaynağının yüksekliği
-            )
-            Spacer(modifier = Modifier.height(15.dp))
-            Text(text = "TC Kimlik Kartı Arka Yüzünü Hizalayın", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
-            Text(text = "Kartı çerçeve içinde tutun", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 2.dp))
-        }
+        CardCanvas(
+            scanOffset = scanOffset,
+            segments = segments,
+            srcWidth = srcWidth,
+            srcHeight = srcHeight
+        )
+        Spacer(modifier = Modifier.height(15.dp))
+        Text(
+            text = "TC Kimlik Kartı Arka Yüzünü Hizalayın",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 12.dp)
+        )
+        Text(
+            text = "Kartı çerçeve içinde tutun",
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 2.dp)
+        )
     }
 }
 
 @Composable
 fun CardCanvas(
     scanOffset: Float,
-    segments: FloatArray? = null,   // <-- eklendi
-    srcWidth: Int = 0,              // <-- eklendi
+    segments: FloatArray? = null,
+    srcWidth: Int = 0,
     srcHeight: Int = 0
 ) {
     Box(
-        modifier = Modifier.fillMaxWidth().scale(1.2f).aspectRatio(1.586f)
+        // ######################################################################
+        //
+        // <--- KARTIN BÜYÜKLÜĞÜNÜ (GENİŞLİĞİNİ VE YÜKSEKLİĞİNİ) BU SATIRLARDAN AYARLARSINIZ
+        //
+        // <--- 1. GENİŞLİK AYARI: "fillMaxWidth(0.85f)" değerini değiştirin.
+        //      Örneğin, "fillMaxWidth(0.95f)" kartı daha geniş yapar.
+        //
+        // <--- 2. YÜKSEKLİK AYARI: Yükseklik, "aspectRatio" ile genişliğe göre
+        //      otomatik ayarlanır. Bu satırı genellikle değiştirmeniz gerekmez.
+        //
+        // ######################################################################
+        modifier = Modifier
+            .fillMaxWidth(0.90f)
+            .aspectRatio(1f / 1.586f)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val cardWidth = size.width
             val cardHeight = size.height
-            val corner = CornerRadius(cardHeight * 0.05f)
+            val corner = CornerRadius(cardWidth * 0.05f)
 
-            // --- card rectangle ---
             drawRoundRect(
                 color = Color.Black.copy(alpha = 0.2f),
                 size = size,
@@ -135,12 +153,13 @@ fun CardCanvas(
                 color = Color.White,
                 size = size,
                 cornerRadius = corner,
-                style = Stroke(width = 1.dp.toPx()))
-            drawChipArea(cardWidth, cardHeight)
-            drawMRZArea(cardWidth, cardHeight)
+                style = Stroke(width = 1.dp.toPx())
+            )
+
+            //drawChipAreaVertical(cardWidth, cardHeight)
+            //drawBarcodeArea(cardWidth, cardHeight)
             drawScanningAnimation(cardWidth, cardHeight, scanOffset)
 
-            // --- SADECE KART ALANI İÇİNE ÇİZ: clipPath ---
             val roundedPath = Path().apply {
                 addRoundRect(
                     ComposeRoundRect(
@@ -148,16 +167,12 @@ fun CardCanvas(
                         top = 0f,
                         right = cardWidth,
                         bottom = cardHeight,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                            x = corner.x,
-                            y = corner.y
-                        )
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(x = corner.x, y = corner.y)
                     )
                 )
             }
 
             clipPath(roundedPath) {
-                // Contour çizimleri: SADECE kart alanında
                 if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
                     val scale = max(cardWidth / srcWidth.toFloat(), cardHeight / srcHeight.toFloat())
                     val dx = (cardWidth - srcWidth * scale) / 2f
@@ -178,7 +193,6 @@ fun CardCanvas(
         }
     }
 }
-
 
 @Composable
 fun BottomControls(
@@ -201,70 +215,62 @@ fun BottomControls(
             Icon(
                 imageVector = Icons.Default.FlashOn,
                 contentDescription = "Flash",
-                tint = if (flashEnabled) Color.White else Color.Yellow
+                tint = if (flashEnabled) Color.Yellow else Color.White
             )
         }
     }
 }
 
-fun DrawScope.drawChipArea(cardWidth: Float, cardHeight: Float) {
-    // Çip, kart yüksekliğinin yaklaşık %25'i kadardır.
-//    val chipHeight = cardHeight * 0.20f
-//    // Genişliği de yüksekliğinin %80'i gibi bir oranda olsun.
-//    val chipWidth = chipHeight * 1.0f
-    val chipWidth = cardWidth * 0.15f
-    val chipHeight = cardHeight * 0.23f
+//fun DrawScope.drawChipAreaVertical(cardWidth: Float, cardHeight: Float) {
+//    val chipWidth = cardWidth * 0.20f
+//    val chipHeight = cardHeight * 0.15f
+//
+//    val marginHorizontal = ((cardWidth*0.90f) - chipWidth) / 2f
+//    val marginVertical = cardHeight * 0.10f
+//
+//    drawRoundRect(
+//        color = Color.White,
+//        topLeft = Offset(marginHorizontal, marginVertical),
+//        size = Size(chipWidth, chipHeight),
+//        cornerRadius = CornerRadius(chipHeight * 0.1f),
+//        style = Stroke(width = 1.dp.toPx())
+//    )
+//}
 
-    // 2. Konumu hassaslaştıralım.
-    // Yatayda, kartın sol kenarından biraz içeride (%7 boşluk bırakalım).
-    val marginHorizontal = cardWidth * 0.10f
-    // Dikeyde, tam olarak ortalamak için.
-    val marginVertical = (cardHeight * 0.40f)*0.85f
-
-    drawRoundRect(
-        color = Color.White, // Sarı
-        topLeft = Offset(marginHorizontal, marginVertical),
-        size = Size(chipWidth, chipHeight),
-        cornerRadius = CornerRadius(chipHeight * 0.1f),
-        style = Stroke(width = 2.dp.toPx())
-    )
-}
-
-fun DrawScope.drawMRZArea(cardWidth: Float, cardHeight: Float) {
-    // 1. Yüksekliği ayarlayalım. %30 genellikle iyi bir değerdir.
-    val mrzHeight = cardHeight * 0.40f
-
-    // 2. Genişliği ve konumu ayarlayalım.
-    // MRZ alanı, kartın en alt kenarında küçük bir boşluk bırakarak daha iyi görünür.
-    val horizontalMargin = 4.dp.toPx() // Sağdan ve soldan çok az boşluk
-    val bottomMargin = 4.dp.toPx()     // Alttan çok az boşluk
-
-    val mrzWidth = cardWidth - (horizontalMargin * 2)
-    val mrzTop = cardHeight - mrzHeight - bottomMargin
-    val mrzLeft = horizontalMargin
-
-    drawRect(
-        color = Color.White, // Kırmızı
-        topLeft = Offset(mrzLeft, mrzTop),
-        size = Size(mrzWidth, mrzHeight),
-        style = Stroke(width = 2.dp.toPx())
-    )
-}
-
+//fun DrawScope.drawBarcodeArea(cardWidth: Float, cardHeight: Float) {
+//    val areaHeight = cardHeight * 0.25f
+//    val horizontalMargin = cardWidth * 0.1f
+//    val bottomMargin = cardHeight * 0.05f
+//
+//    val areaWidth = cardWidth - (horizontalMargin * 2)
+//    val areaTop = cardHeight - areaHeight - bottomMargin
+//    val areaLeft = horizontalMargin
+//
+//    drawRect(
+//        color = Color.White,
+//        topLeft = Offset(areaLeft, areaTop),
+//        size = Size(areaWidth, areaHeight),
+//        style = Stroke(width = 2.dp.toPx())
+//    )
+//}
 
 fun DrawScope.drawScanningAnimation(cardWidth: Float, cardHeight: Float, scanOffset: Float) {
+    val gradientHeight = cardHeight * 0.4f
+    val animatedY = scanOffset * (cardHeight - gradientHeight)
+
     val gradient = Brush.verticalGradient(
         colors = listOf(
             Color.Transparent,
-            Color(0xFF4CAF50).copy(alpha = 0.7f),
+            Color(0xFF00FF00).copy(alpha = 0.2f),
             Color.Transparent
-        )
+        ),
+        startY = animatedY,
+        endY = animatedY + gradientHeight
     )
-    val animatedY = scanOffset * cardHeight
 
     drawRect(
         brush = gradient,
-        topLeft = Offset(0f, animatedY - cardHeight / 4),
-        size = Size(cardWidth, cardHeight / 2),
+        topLeft = Offset(0f, animatedY),
+        size = Size(cardWidth, gradientHeight)
     )
 }
