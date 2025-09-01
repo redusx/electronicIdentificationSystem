@@ -1,3 +1,4 @@
+// app/src/main/java/com/example/countercamtest/Overlay.kt
 package com.example.countercamtest
 
 import androidx.camera.core.Camera
@@ -22,6 +23,10 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
@@ -45,7 +50,7 @@ fun ScannerScreen(
             animation = tween(durationMillis = 2000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "scan_offset_anim"
+        label = "scan_offset_anim",
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -85,6 +90,13 @@ private fun CardOverlayContainer(
     srcWidth: Int = 0,
     srcHeight: Int = 0
 ) {
+    val config = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidth = with(density) { config.screenWidthDp.dp.toPx() }
+    val screenHeight = with(density) { config.screenHeightDp.dp.toPx() }
+
+    var cardOffset by remember { mutableStateOf(Offset.Zero) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -96,7 +108,13 @@ private fun CardOverlayContainer(
             scanOffset = scanOffset,
             segments = segments,
             srcWidth = srcWidth,
-            srcHeight = srcHeight
+            srcHeight = srcHeight,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight,
+            cardOffset = cardOffset,
+            modifier = Modifier.onGloballyPositioned { coords ->
+                cardOffset = coords.positionInRoot()
+            }
         )
         Spacer(modifier = Modifier.height(15.dp))
         Text(
@@ -122,7 +140,11 @@ fun CardCanvas(
     scanOffset: Float,
     segments: FloatArray? = null,
     srcWidth: Int = 0,
-    srcHeight: Int = 0
+    srcHeight: Int = 0,
+    screenWidth: Float,
+    screenHeight: Float,
+    cardOffset: Offset,
+    modifier: Modifier = Modifier
 ) {
     Box(
         // ######################################################################
@@ -136,7 +158,7 @@ fun CardCanvas(
         //      otomatik ayarlanır. Bu satırı genellikle değiştirmeniz gerekmez.
         //
         // ######################################################################
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth(0.90f)
             .aspectRatio(1f / 1.586f)
     ) {
@@ -174,11 +196,14 @@ fun CardCanvas(
 
             clipPath(roundedPath) {
                 if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
-                    val scale = max(cardWidth / srcWidth.toFloat(), cardHeight / srcHeight.toFloat())
-                    val dx = (cardWidth - srcWidth * scale) / 2f
-                    val dy = (cardHeight - srcHeight * scale) / 2f
+                    val scale = max(screenWidth / srcWidth.toFloat(), screenHeight / srcHeight.toFloat())
+                    val dx = (screenWidth - srcWidth * scale) / 2f
+                    val dy = (screenHeight - srcHeight * scale) / 2f
 
-                    fun map(x: Float, y: Float) = Offset(x * scale + dx, y * scale + dy)
+                    fun map(x: Float, y: Float): Offset {
+                        val global = Offset(x * scale + dx, y * scale + dy)
+                        return global - cardOffset
+                    }
 
                     var i = 0
                     val stroke = 2.dp.toPx()

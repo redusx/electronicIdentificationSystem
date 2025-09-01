@@ -156,17 +156,17 @@ private fun ContourScreen() {
 //                }
 //            }
 //        }
-        Box(
-            Modifier
-                .align(Alignment.TopStart)
-                .padding(12.dp)
-                .background(Color(0x80000000), shape = MaterialTheme.shapes.medium)
-        ) {
-            Text(
-                text = "FPS: ${"%.1f".format(fps)}",
-                color = Color.White,
-                modifier = Modifier.padding(8.dp)
-            )
-        }
+//        Box(
+//            Modifier
+//                .align(Alignment.TopStart)
+//                .padding(12.dp)
+//                .background(Color(0x80000000), shape = MaterialTheme.shapes.medium)
+//        ) {
+//            Text(
+//                text = "FPS: ${"%.1f".format(fps)}",
+//                color = Color.White,
+//                modifier = Modifier.padding(8.dp)
+//            )
+//        }
     }
 }
