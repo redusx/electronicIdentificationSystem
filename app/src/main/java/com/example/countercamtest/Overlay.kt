@@ -1,4 +1,3 @@
-// app/src/main/java/com/example/countercamtest/Overlay.kt
 package com.example.countercamtest
 
 import androidx.camera.core.Camera
@@ -194,27 +193,27 @@ fun CardCanvas(
                 )
             }
 
-            clipPath(roundedPath) {
-                if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
-                    val scale = max(screenWidth / srcWidth.toFloat(), screenHeight / srcHeight.toFloat())
-                    val dx = (screenWidth - srcWidth * scale) / 2f
-                    val dy = (screenHeight - srcHeight * scale) / 2f
-
-                    fun map(x: Float, y: Float): Offset {
-                        val global = Offset(x * scale + dx, y * scale + dy)
-                        return global - cardOffset
-                    }
-
-                    var i = 0
-                    val stroke = 2.dp.toPx()
-                    while (i + 3 < segments.size) {
-                        val p1 = map(segments[i],     segments[i + 1])
-                        val p2 = map(segments[i + 2], segments[i + 3])
-                        drawLine(Color.Red, p1, p2, strokeWidth = stroke)
-                        i += 4
-                    }
-                }
-            }
+//            clipPath(roundedPath) {
+//                if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
+//                    val scale = max(screenWidth / srcWidth.toFloat(), screenHeight / srcHeight.toFloat())
+//                    val dx = (screenWidth - srcWidth * scale) / 2f
+//                    val dy = (screenHeight - srcHeight * scale) / 2f
+//
+//                    fun map(x: Float, y: Float): Offset {
+//                        val global = Offset(x * scale + dx, y * scale + dy)
+//                        return global - cardOffset
+//                    }
+//
+//                    var i = 0
+//                    val stroke = 2.dp.toPx()
+//                    while (i + 3 < segments.size) {
+//                        val p1 = map(segments[i],     segments[i + 1])
+//                        val p2 = map(segments[i + 2], segments[i + 3])
+//                        drawLine(Color.Red, p1, p2, strokeWidth = stroke)
+//                        i += 4
+//                    }
+//                }
+//            }
         }
     }
 }
