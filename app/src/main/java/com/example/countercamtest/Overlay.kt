@@ -5,7 +5,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FlashOn
@@ -20,25 +19,26 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.max
+import androidx.compose.ui.geometry.RoundRect as ComposeRoundRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.geometry.RoundRect as ComposeRoundRect
 
 @Composable
 fun ScannerScreen(
     camera: Camera?,
     segments: FloatArray? = null,
     srcWidth: Int = 0,
-    srcHeight: Int = 0) {
+    srcHeight: Int = 0,
+    isCardDetected: Boolean = false
+) {
     var flashEnabled by remember { mutableStateOf(false) }
 
     val scanAnimation = rememberInfiniteTransition(label = "scan_animation")
@@ -66,7 +66,8 @@ fun ScannerScreen(
                 scanOffset = scanOffset,
                 segments = segments,
                 srcWidth = srcWidth,
-                srcHeight = srcHeight
+                srcHeight = srcHeight,
+                isCardDetected = isCardDetected
             )
 
             Spacer(modifier = Modifier.weight(0.5f))
@@ -87,7 +88,8 @@ private fun CardOverlayContainer(
     scanOffset: Float,
     segments: FloatArray? = null,
     srcWidth: Int = 0,
-    srcHeight: Int = 0
+    srcHeight: Int = 0,
+    isCardDetected: Boolean = false
 ) {
     val config = LocalConfiguration.current
     val density = LocalDensity.current
@@ -111,6 +113,7 @@ private fun CardOverlayContainer(
             screenWidth = screenWidth,
             screenHeight = screenHeight,
             cardOffset = cardOffset,
+            isCardDetected = isCardDetected,
             modifier = Modifier.onGloballyPositioned { coords ->
                 cardOffset = coords.positionInRoot()
             }
@@ -143,20 +146,10 @@ fun CardCanvas(
     screenWidth: Float,
     screenHeight: Float,
     cardOffset: Offset,
+    isCardDetected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Box(
-        // ######################################################################
-        //
-        // <--- KARTIN BÜYÜKLÜĞÜNÜ (GENİŞLİĞİNİ VE YÜKSEKLİĞİNİ) BU SATIRLARDAN AYARLARSINIZ
-        //
-        // <--- 1. GENİŞLİK AYARI: "fillMaxWidth(0.85f)" değerini değiştirin.
-        //      Örneğin, "fillMaxWidth(0.95f)" kartı daha geniş yapar.
-        //
-        // <--- 2. YÜKSEKLİK AYARI: Yükseklik, "aspectRatio" ile genişliğe göre
-        //      otomatik ayarlanır. Bu satırı genellikle değiştirmeniz gerekmez.
-        //
-        // ######################################################################
         modifier = modifier
             .fillMaxWidth(0.90f)
             .aspectRatio(1f / 1.586f)
@@ -166,54 +159,17 @@ fun CardCanvas(
             val cardHeight = size.height
             val corner = CornerRadius(cardWidth * 0.05f)
 
-            drawRoundRect(
-                color = Color.Black.copy(alpha = 0.2f),
-                size = size,
-                cornerRadius = corner)
-            drawRoundRect(
-                color = Color.White,
-                size = size,
-                cornerRadius = corner,
-                style = Stroke(width = 1.dp.toPx())
-            )
+            // Kart tespit edildiğinde yeşil arka plan, yoksa siyah
+            val backgroundColor = if (isCardDetected) Color.Green.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.2f)
+            val borderColor = if (isCardDetected) Color.Green else Color.White
 
-            //drawChipAreaVertical(cardWidth, cardHeight)
-            //drawBarcodeArea(cardWidth, cardHeight)
-            drawScanningAnimation(cardWidth, cardHeight, scanOffset)
-
-            val roundedPath = Path().apply {
-                addRoundRect(
-                    ComposeRoundRect(
-                        left = 0f,
-                        top = 0f,
-                        right = cardWidth,
-                        bottom = cardHeight,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(x = corner.x, y = corner.y)
-                    )
-                )
+            drawRoundRect(color = backgroundColor, size = size, cornerRadius = corner)
+            drawRoundRect(color = borderColor, size = size, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
+            
+            // Kart tespit edildiğinde animasyonu durdur
+            if (!isCardDetected) {
+                drawScanningAnimation(cardWidth, cardHeight, scanOffset)
             }
-
-//            clipPath(roundedPath) {
-//                if (segments != null && segments.isNotEmpty() && srcWidth > 0 && srcHeight > 0) {
-//                    val scale = max(screenWidth / srcWidth.toFloat(), screenHeight / srcHeight.toFloat())
-//                    val dx = (screenWidth - srcWidth * scale) / 2f
-//                    val dy = (screenHeight - srcHeight * scale) / 2f
-//
-//                    fun map(x: Float, y: Float): Offset {
-//                        val global = Offset(x * scale + dx, y * scale + dy)
-//                        return global - cardOffset
-//                    }
-//
-//                    var i = 0
-//                    val stroke = 2.dp.toPx()
-//                    while (i + 3 < segments.size) {
-//                        val p1 = map(segments[i],     segments[i + 1])
-//                        val p2 = map(segments[i + 2], segments[i + 3])
-//                        drawLine(Color.Red, p1, p2, strokeWidth = stroke)
-//                        i += 4
-//                    }
-//                }
-//            }
         }
     }
 }
@@ -224,77 +180,26 @@ fun BottomControls(
     onFlashToggle: () -> Unit
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 32.dp, top = 16.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp, top = 16.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
             onClick = onFlashToggle,
-            modifier = Modifier
-                .size(64.dp)
-                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            modifier = Modifier.size(64.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
         ) {
-            Icon(
-                imageVector = Icons.Default.FlashOn,
-                contentDescription = "Flash",
-                tint = if (flashEnabled) Color.Yellow else Color.White
-            )
+            Icon(imageVector = Icons.Default.FlashOn, contentDescription = "Flash", tint = if (flashEnabled) Color.Yellow else Color.White)
         }
     }
 }
 
-//fun DrawScope.drawChipAreaVertical(cardWidth: Float, cardHeight: Float) {
-//    val chipWidth = cardWidth * 0.20f
-//    val chipHeight = cardHeight * 0.15f
-//
-//    val marginHorizontal = ((cardWidth*0.90f) - chipWidth) / 2f
-//    val marginVertical = cardHeight * 0.10f
-//
-//    drawRoundRect(
-//        color = Color.White,
-//        topLeft = Offset(marginHorizontal, marginVertical),
-//        size = Size(chipWidth, chipHeight),
-//        cornerRadius = CornerRadius(chipHeight * 0.1f),
-//        style = Stroke(width = 1.dp.toPx())
-//    )
-//}
-
-//fun DrawScope.drawBarcodeArea(cardWidth: Float, cardHeight: Float) {
-//    val areaHeight = cardHeight * 0.25f
-//    val horizontalMargin = cardWidth * 0.1f
-//    val bottomMargin = cardHeight * 0.05f
-//
-//    val areaWidth = cardWidth - (horizontalMargin * 2)
-//    val areaTop = cardHeight - areaHeight - bottomMargin
-//    val areaLeft = horizontalMargin
-//
-//    drawRect(
-//        color = Color.White,
-//        topLeft = Offset(areaLeft, areaTop),
-//        size = Size(areaWidth, areaHeight),
-//        style = Stroke(width = 2.dp.toPx())
-//    )
-//}
-
 fun DrawScope.drawScanningAnimation(cardWidth: Float, cardHeight: Float, scanOffset: Float) {
     val gradientHeight = cardHeight * 0.4f
     val animatedY = scanOffset * (cardHeight - gradientHeight)
-
     val gradient = Brush.verticalGradient(
-        colors = listOf(
-            Color.Transparent,
-            Color(0xFF00FF00).copy(alpha = 0.2f),
-            Color.Transparent
-        ),
+        colors = listOf(Color.Transparent, Color(0xFF00FF00).copy(alpha = 0.2f), Color.Transparent),
         startY = animatedY,
         endY = animatedY + gradientHeight
     )
-
-    drawRect(
-        brush = gradient,
-        topLeft = Offset(0f, animatedY),
-        size = Size(cardWidth, gradientHeight)
-    )
+    drawRect(brush = gradient, topLeft = Offset(0f, animatedY), size = Size(cardWidth, gradientHeight))
 }
