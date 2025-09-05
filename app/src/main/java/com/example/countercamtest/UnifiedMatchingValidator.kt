@@ -12,6 +12,7 @@ import org.opencv.calib3d.Calib3d
 import org.opencv.imgproc.Imgproc
 import java.io.IOException
 import kotlin.math.*
+import kotlinx.coroutines.*
 
 class UnifiedMatchingValidator(private val context: Context) {
 
@@ -50,6 +51,9 @@ class UnifiedMatchingValidator(private val context: Context) {
     )
 
     private val matcher: DescriptorMatcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING)
+    
+    // TC MRZ Reader - professional implementation
+    private val tcMrzReader: TCMRZReader by lazy { TCMRZReader(context) }
 
     // Reference image data
     private var referenceKeyPoints = MatOfKeyPoint()
@@ -71,7 +75,8 @@ class UnifiedMatchingValidator(private val context: Context) {
         val homographyMatrix: Mat?,
         val matchedKeypoints: List<Pair<Point, Point>>?,
         val processingTimeMs: Long,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val mrzData: TCMRZReader.TCMRZResult? = null
     )
 
     init {
@@ -184,7 +189,7 @@ class UnifiedMatchingValidator(private val context: Context) {
         orb.detectAndCompute(referenceMat, Mat(), referenceKeyPoints, referenceDescriptors)
     }
 
-    fun validateWithUnifiedMatching(inputBitmap: Bitmap): UnifiedValidationResult {
+    fun validateWithUnifiedMatching(inputBitmap: Bitmap, overlayBounds: android.graphics.Rect? = null): UnifiedValidationResult {
         val startTime = System.currentTimeMillis()
 
         try {
@@ -330,6 +335,24 @@ class UnifiedMatchingValidator(private val context: Context) {
                 }
             }
 
+            // TC MRZ OCR işlemi - sadece kart tespit edildiğinde
+            var mrzData: TCMRZReader.TCMRZResult? = null
+            if (goodMatches.size >= MIN_MATCH_COUNT) {
+                try {
+                    Log.d(TAG, "Starting TC MRZ OCR reading...")
+                    mrzData = runBlocking {
+                        tcMrzReader.readTCMRZ(inputBitmap, overlayBounds)
+                    }
+                    Log.d(TAG, "TC MRZ OCR completed: Success=${mrzData.success}, Confidence=${mrzData.confidence}%")
+                    
+                    if (mrzData.success) {
+                        Log.i(TAG, "TC MRZ Data extracted: ${mrzData.data?.surname} ${mrzData.data?.name}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "TC MRZ OCR error: ${e.message}", e)
+                }
+            }
+
             // Calculate confidence based on multiple factors
             val confidence = calculateUnifiedConfidence(goodMatches.size, homographyFound, scaleRatio, rotationAngle)
             val isValid = goodMatches.size >= MIN_MATCH_COUNT && confidence > 0.3f
@@ -353,7 +376,8 @@ class UnifiedMatchingValidator(private val context: Context) {
                 rotationAngle = rotationAngle,
                 homographyMatrix = homographyMatrix,
                 matchedKeypoints = if (matchedPoints.isNotEmpty()) matchedPoints else null,
-                processingTimeMs = System.currentTimeMillis() - startTime
+                processingTimeMs = System.currentTimeMillis() - startTime,
+                mrzData = mrzData
             )
 
         } catch (e: Exception) {
@@ -371,7 +395,8 @@ class UnifiedMatchingValidator(private val context: Context) {
                 homographyMatrix = null,
                 matchedKeypoints = null,
                 processingTimeMs = System.currentTimeMillis() - startTime,
-                errorMessage = e.message
+                errorMessage = e.message,
+                mrzData = null
             )
         }
     }
@@ -443,6 +468,7 @@ class UnifiedMatchingValidator(private val context: Context) {
             referenceKeyPoints.release()
             referenceDescriptors.release()
             referenceMat.release()
+            tcMrzReader.cleanup()
         } catch (e: Exception) {
             Log.e(TAG, "Cleanup error: ${e.message}")
         }

@@ -80,14 +80,14 @@ private fun CameraScreen() {
     var camera by remember { mutableStateOf<Camera?>(null) }
 
     val analyzer = remember {
-        UnifiedMatchingAnalyzer(unifiedValidator) { result ->
+        UnifiedMatchingAnalyzer(unifiedValidator, { result ->
             mainExecutor.execute {
                 unifiedValidationResult = result
                 if (result.isValid) {
                     Log.i("MainActivity", "CARD FOUND! Confidence: ${result.confidence}")
                 }
             }
-        }
+        })
     }
 
     // Cleanup
@@ -123,17 +123,81 @@ private fun CameraScreen() {
             isCardDetected = unifiedValidationResult?.isValid == true
         )
 
-        // Güven skorunu sol üst köşede göster
+        // MRZ ve güven skorunu göster
         unifiedValidationResult?.let { result ->
-            Text(
-                text = "Güven: ${(result.confidence * 100).toInt()}%",
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
+            Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(16.dp)
-            )
+            ) {
+                Text(
+                    text = "Güven: ${(result.confidence * 100).toInt()}%",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                result.mrzData?.let { tcMrz ->
+                    if (tcMrz.success) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "📄 TC MRZ Başarıyla Okundu",
+                            color = Color.Green,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        tcMrz.data?.let { data ->
+                            if (data.documentNumber.isNotEmpty()) {
+                                Text(
+                                    text = "Belge No: ${data.documentNumber}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (data.name.isNotEmpty() || data.surname.isNotEmpty()) {
+                                Text(
+                                    text = "Ad Soyad: ${data.name} ${data.surname}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (data.nationalId.isNotEmpty()) {
+                                Text(
+                                    text = "TC No: ${data.nationalId}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (data.birthDate.isNotEmpty()) {
+                                Text(
+                                    text = "Doğum: ${data.birthDate}",
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Text(
+                            text = "MRZ Güven: ${tcMrz.confidence.toInt()}%",
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
+                    } else if (result.isValid) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "📄 MRZ Okunamadı",
+                            color = Color.Yellow,
+                            fontSize = 12.sp
+                        )
+                        tcMrz.errorMessage?.let { error ->
+                            Text(
+                                text = error,
+                                color = Color.Red,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -72,13 +72,14 @@ fun ScannerScreen(
 
             Spacer(modifier = Modifier.weight(0.5f))
 
-            BottomControls(
-                flashEnabled = flashEnabled,
-                onFlashToggle = {
-                    flashEnabled = !flashEnabled
-                    camera?.cameraControl?.enableTorch(flashEnabled)
-                }
-            )
+            // Flash controls disabled
+            // BottomControls(
+            //     flashEnabled = flashEnabled,
+            //     onFlashToggle = {
+            //         flashEnabled = !flashEnabled
+            //         camera?.cameraControl?.enableTorch(flashEnabled)
+            //     }
+            // )
         }
     }
 }

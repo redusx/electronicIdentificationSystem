@@ -16,12 +16,13 @@ import kotlin.coroutines.suspendCoroutine
 
 class UnifiedMatchingAnalyzer(
     private val unifiedValidator: UnifiedMatchingValidator,
-    private val onValidationResult: (UnifiedMatchingValidator.UnifiedValidationResult) -> Unit
+    private val onValidationResult: (UnifiedMatchingValidator.UnifiedValidationResult) -> Unit,
+    private var overlayBounds: android.graphics.Rect? = null
 ) : ImageAnalysis.Analyzer {
 
     companion object {
         private const val TAG = "UnifiedMatchingAnalyzer"
-        private const val ANALYSIS_INTERVAL_MS = 1500L // Optimized interval for better performance
+        private const val ANALYSIS_INTERVAL_MS = 1000L // Optimized interval for better performance
         private const val MAX_CONSECUTIVE_FAILURES = 5
     }
 
@@ -68,8 +69,8 @@ class UnifiedMatchingAnalyzer(
                 // Convert ImageProxy to Bitmap with optimized method
                 val bitmap = imageProxyToBitmap(image)
 
-                // Perform unified validation
-                val result = unifiedValidator.validateWithUnifiedMatching(bitmap)
+                // Perform unified validation with overlay bounds
+                val result = unifiedValidator.validateWithUnifiedMatching(bitmap, overlayBounds)
 
                 val analysisEndTime = System.currentTimeMillis()
                 val analysisTime = analysisEndTime - analysisStartTime
@@ -113,7 +114,8 @@ class UnifiedMatchingAnalyzer(
                             homographyMatrix = null,
                             matchedKeypoints = null,
                             processingTimeMs = 0L,
-                            errorMessage = "Analysis error: ${e.message}"
+                            errorMessage = "Analysis error: ${e.message}",
+                            mrzData = null
                         )
                     )
                 }
@@ -251,5 +253,10 @@ class UnifiedMatchingAnalyzer(
 
     fun forceAnalysis() {
         lastAnalysisTime = 0L // Reset to force next analysis
+    }
+    
+    fun updateOverlayBounds(bounds: android.graphics.Rect?) {
+        overlayBounds = bounds
+        Log.d(TAG, "Overlay bounds updated: $bounds")
     }
 }

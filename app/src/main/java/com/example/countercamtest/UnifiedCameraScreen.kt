@@ -157,10 +157,10 @@ private fun setupUnifiedCamera(
                 .also { analysis ->
                     analysis.setAnalyzer(
                         executor,
-                        UnifiedMatchingAnalyzer(validator) { result ->
+                        UnifiedMatchingAnalyzer(validator, { result ->
                             onAnalysisStateChange(false)
                             onValidationResult(result)
-                        }
+                        })
                     )
                 }
 
