@@ -122,31 +122,45 @@ private fun CameraScreen(
     val unifiedValidator = remember { UnifiedMatchingValidator(context) }
     var unifiedValidationResult by remember { mutableStateOf<UnifiedMatchingValidator.UnifiedValidationResult?>(null) }
     
-    // MRZ okuma durumu
+    // MRZ okuma durumu ve analyzer kontrol
     var cardDetected by remember { mutableStateOf(false) }
     var mrzProcessing by remember { mutableStateOf(false) }
     var mrzProcessed by remember { mutableStateOf(false) }
+    var analyzerEnabled by remember { mutableStateOf(true) }
 
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
     var camera by remember { mutableStateOf<Camera?>(null) }
+    var analyzerInstance by remember { mutableStateOf<UnifiedMatchingAnalyzer?>(null) }
 
     val analyzer = remember {
         UnifiedMatchingAnalyzer(unifiedValidator, { result ->
             mainExecutor.execute {
+                // Analyzer devre dışıysa işlem yapma
+                if (!analyzerEnabled || mrzProcessed) {
+                    Log.d("MainActivity", "Analyzer disabled or MRZ already processed - skipping")
+                    return@execute
+                }
+                
                 unifiedValidationResult = result
                 
                 // Kart tespit edildiğinde ve henüz MRZ işlemi yapılmadıysa
                 if (result.isValid && !cardDetected && !mrzProcessing && !mrzProcessed) {
-                    Log.i("MainActivity", "CARD DETECTED! Starting MRZ processing...")
+                    Log.i("MainActivity", "🎯 CARD DETECTED! Starting MRZ processing...")
                     cardDetected = true
                     mrzProcessing = true
                     
-                    // MRZ okumasını hemen başlat
+                    // MRZ okumasını kontrol et
                     result.mrzData?.let { mrzResult ->
                         if (mrzResult.success) {
+                            Log.i("MainActivity", "🎉 MRZ READ SUCCESS! Disabling analyzer...")
                             mrzProcessed = true
                             mrzProcessing = false
-                            Log.i("MainActivity", "MRZ READ SUCCESS! Navigating to results...")
+                            analyzerEnabled = false
+                            
+                            // Analyzer'ı durdur
+                            analyzerInstance?.disableAnalysis()
+                            
+                            Log.i("MainActivity", "📋 Navigating to results...")
                             onMRZDetected(mrzResult)
                         } else {
                             mrzProcessing = false
@@ -158,7 +172,9 @@ private fun CameraScreen(
                     }
                 }
             }
-        })
+        }).also { 
+            analyzerInstance = it
+        }
     }
 
     // Cleanup

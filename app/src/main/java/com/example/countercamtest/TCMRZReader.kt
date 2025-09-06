@@ -88,6 +88,7 @@ class TCMRZReader(private val context: Context) {
         val nationalId: String,
         val name: String,
         val surname: String,
+        val secondName: String = "", // İkinci isim
         val birthDate: String,
         val gender: String,
         val expiryDate: String,
@@ -283,12 +284,14 @@ class TCMRZReader(private val context: Context) {
         val cvMrzRect = org.opencv.core.Rect(safeLeft, safeTop, safeWidth, safeHeight)
         val mrzMat = Mat(grayMat, cvMrzRect)
         
-        // MINIMAL PREPROCESSING - MLKit works better with less processing
-        Log.d(TAG, "Using minimal preprocessing for MLKit")
+        // ADVANCED PREPROCESSING - CLAHE + Unsharp Mask for improved OCR accuracy
+        Log.d(TAG, "Applying advanced preprocessing: CLAHE + Unsharp Mask")
         
-        // Convert back to Bitmap directly with minimal processing
-        val resultBitmap = Bitmap.createBitmap(mrzMat.cols(), mrzMat.rows(), Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(mrzMat, resultBitmap)
+        val enhancedMat = applyAdvancedPreprocessing(mrzMat)
+        
+        // Convert back to Bitmap
+        val resultBitmap = Bitmap.createBitmap(enhancedMat.cols(), enhancedMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(enhancedMat, resultBitmap)
         
         Log.d(TAG, "MRZ preprocessing completed: ${resultBitmap.width}x${resultBitmap.height}")
         
@@ -296,8 +299,56 @@ class TCMRZReader(private val context: Context) {
         inputMat.release()
         grayMat.release()
         mrzMat.release()
+        enhancedMat.release()
         
         return resultBitmap
+    }
+
+    /**
+     * Advanced image preprocessing using CLAHE and Unsharp Mask
+     * Improves OCR accuracy by enhancing contrast and sharpening text edges
+     */
+    private fun applyAdvancedPreprocessing(inputMat: Mat): Mat {
+        Log.d(TAG, "Starting advanced preprocessing pipeline")
+        
+        try {
+            // 1. CLAHE (Contrast Limited Adaptive Histogram Equalization) - AGGRESSIVE
+            Log.d(TAG, "Applying AGGRESSIVE CLAHE for maximum contrast enhancement")
+            val clahe = Imgproc.createCLAHE(4.0, Size(4.0, 4.0)) // 2x daha agresif
+            val claheResult = Mat()
+            clahe.apply(inputMat, claheResult)
+            
+            // 2. Gaussian + Unsharp Mask for sharpening - AGGRESSIVE
+            Log.d(TAG, "Applying AGGRESSIVE Gaussian + Unsharp Mask for maximum sharpening")
+            
+            // Create Gaussian blurred version - daha büyük kernel
+            val blurred = Mat()
+            Imgproc.GaussianBlur(claheResult, blurred, Size(7.0, 7.0), 1.5) // Daha büyük blur
+            
+            // Create mask by subtracting blurred from original
+            val mask = Mat()
+            Core.subtract(claheResult, blurred, mask)
+            
+            // Apply unsharp mask: enhanced = original + amount * mask - MUCH STRONGER
+            val sharpened = Mat()
+            Core.addWeighted(claheResult, 1.0, mask, 3.0, 0.0, sharpened) // 1.5 -> 3.0 (2x güçlü)
+            
+            Log.d(TAG, "Advanced preprocessing completed successfully")
+            
+            // Cleanup intermediate results
+            claheResult.release()
+            blurred.release()
+            mask.release()
+            
+            return sharpened
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in advanced preprocessing: ${e.message}", e)
+            // Fallback: return original mat if preprocessing fails
+            val fallback = Mat()
+            inputMat.copyTo(fallback)
+            return fallback
+        }
     }
 
     private suspend fun performMLKitOCR(bitmap: Bitmap): String {
@@ -368,156 +419,171 @@ class TCMRZReader(private val context: Context) {
     }
 
     private fun parseMRZLines(ocrText: String): List<String> {
+        Log.d(TAG, "=== NEW PATTERN-BASED MRZ PARSING ===")
         Log.d(TAG, "Parsing MRZ from OCR text (${ocrText.length} chars)")
-        Log.d(TAG, "Raw OCR text: '${ocrText.take(300)}${if (ocrText.length > 300) "..." else ""}'")
+        Log.d(TAG, "Raw OCR text: '${ocrText.take(500)}${if (ocrText.length > 500) "..." else ""}'")
         
         if (ocrText.isEmpty()) {
             Log.w(TAG, "Empty OCR text received")
             return emptyList()
         }
         
-        // Step 1: Find potential MRZ lines in the OCR text
-        val allLines = ocrText.split(Regex("[\\r\\n]+"))
+        // Split into all possible lines
+        val allLines = ocrText.split(Regex("[\\r\\n]+")).filter { it.trim().isNotEmpty() }
         Log.d(TAG, "Split into ${allLines.size} raw lines")
         
         allLines.forEachIndexed { index, line ->
-            if (line.trim().isNotEmpty()) {
-                Log.d(TAG, "Raw line $index: '${line.trim()}' (${line.trim().length} chars)")
-            }
+            Log.d(TAG, "Raw line $index: '${line.trim()}' (${line.trim().length} chars)")
         }
         
-        // Step 2: Look for MRZ-like patterns
-        val potentialMrzLines = mutableListOf<String>()
+        // PATTERN-BASED APPROACH: Search for specific MRZ patterns
+        val foundLines = mutableListOf<String>()
         
-        for (line in allLines) {
-            val cleanLine = line.trim()
-                .replace(Regex("\\s+"), "") // Remove spaces
-                .replace("O", "0") // OCR corrections
-                .replace("l", "1") // OCR corrections
-                .replace("I", "1") // OCR corrections
-                .replace("S", "5") // OCR corrections
-                .replace("G", "6") // OCR corrections
-                .replace("B", "8") // OCR corrections
-                .toUpperCase()
-            
-            // Check if line has MRZ characteristics
-            if (cleanLine.length >= 25) { // MRZ lines are typically 30 chars but allow some error
-                val mrzCharCount = cleanLine.count { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" }
-                val mrzPercentage = mrzCharCount.toFloat() / cleanLine.length
-                
-                Log.d(TAG, "Potential MRZ line: '$cleanLine' (${cleanLine.length} chars, ${(mrzPercentage * 100).toInt()}% MRZ chars)")
-                
-                if (mrzPercentage > 0.8) { // 80% of characters should be MRZ-valid
-                    potentialMrzLines.add(cleanLine)
-                    Log.d(TAG, "Added as potential MRZ line")
-                }
-            }
+        // Search for Line 1 pattern (I + TUR + TC number)
+        val line1 = findMRZLine1Pattern(allLines)
+        if (line1 != null) {
+            foundLines.add(line1)
+            Log.i(TAG, "✅ Found MRZ Line 1: '$line1'")
+        } else {
+            Log.w(TAG, "❌ MRZ Line 1 not found")
         }
         
-        Log.d(TAG, "Found ${potentialMrzLines.size} potential MRZ lines")
-        
-        // Step 3: If we have too few lines but one long line, try to split it
-        if (potentialMrzLines.size == 1 && potentialMrzLines[0].length >= 75) {
-            val longLine = potentialMrzLines[0]
-            val splitLines = mutableListOf<String>()
-            
-            Log.d(TAG, "Attempting to split long line: '$longLine' (${longLine.length} chars)")
-            
-            // Split into 30-character chunks
-            for (i in 0 until longLine.length step 30) {
-                val end = minOf(i + 30, longLine.length)
-                val chunk = longLine.substring(i, end)
-                
-                if (chunk.length >= 25) { // Must be reasonably long
-                    splitLines.add(chunk)
-                    Log.d(TAG, "Split chunk ${splitLines.size}: '$chunk' (${chunk.length} chars)")
-                }
-                
-                if (splitLines.size >= 3) break // TC MRZ has 3 lines
-            }
-            
-            if (splitLines.size >= 2) {
-                potentialMrzLines.clear()
-                potentialMrzLines.addAll(splitLines)
-                Log.d(TAG, "Successfully split into ${splitLines.size} MRZ lines")
-            }
+        // Search for Line 2 pattern (dates + gender + TUR)
+        val line2 = findMRZLine2Pattern(allLines)
+        if (line2 != null) {
+            foundLines.add(line2)
+            Log.i(TAG, "✅ Found MRZ Line 2: '$line2'")
+        } else {
+            Log.w(TAG, "❌ MRZ Line 2 not found")
         }
         
-        // Step 4: Take the best 3 lines and pad/trim to 30 characters if needed
-        val finalLines = potentialMrzLines.take(3).map { line ->
-            when {
-                line.length == 30 -> line
-                line.length < 30 -> line.padEnd(30, '<')
-                else -> line.take(30)
-            }
+        // Search for Line 3 pattern (names with << separator)
+        val line3 = findMRZLine3Pattern(allLines)
+        if (line3 != null) {
+            foundLines.add(line3)
+            Log.i(TAG, "✅ Found MRZ Line 3: '$line3'")
+        } else {
+            Log.w(TAG, "❌ MRZ Line 3 not found")
         }
         
-        Log.d(TAG, "Final MRZ lines: ${finalLines.size}")
-        finalLines.forEachIndexed { index, line ->
-            Log.d(TAG, "Final line ${index + 1}: '$line' (${line.length} chars)")
+        Log.d(TAG, "=== PATTERN-BASED PARSING COMPLETE ===")
+        Log.d(TAG, "Found ${foundLines.size} MRZ lines using pattern matching")
+        
+        foundLines.forEachIndexed { index, line ->
+            Log.d(TAG, "Pattern-matched line ${index + 1}: '$line' (${line.length} chars)")
         }
         
-        return finalLines
+        // Return found lines (even if incomplete - partial MRZ is better than wrong MRZ)
+        return foundLines
     }
 
     private fun validateMRZFormat(mrzLines: List<String>): Boolean {
+        Log.d(TAG, "=== PATTERN-AWARE MRZ VALIDATION ===")
+        
         if (mrzLines.isEmpty()) {
-            Log.w(TAG, "No MRZ lines to validate")
+            Log.w(TAG, "No MRZ lines to validate - FAILED")
             return false
         }
         
-        if (mrzLines.size < 2) {
-            Log.w(TAG, "Insufficient MRZ lines: ${mrzLines.size}, need at least 2")
-            return false
-        }
-        
-        Log.d(TAG, "Validating TC MRZ format with ${mrzLines.size} lines:")
+        Log.d(TAG, "Validating ${mrzLines.size} pattern-matched MRZ lines:")
         mrzLines.forEachIndexed { index, line ->
             Log.d(TAG, "Line ${index + 1}: '$line' (length: ${line.length})")
         }
         
-        // Daha esnek validation - sadece temel pattern kontrolleri
+        // Pattern-based validation - if we found lines using patterns, they should be valid
         var validLines = 0
-        var hasIdPattern = false
-        var hasNamePattern = false
-        var hasDatePattern = false
+        var hasLine1 = false
+        var hasLine2 = false
+        var hasLine3 = false
         
         mrzLines.forEachIndexed { index, line ->
+            // Since we used pattern matching to find these lines, 
+            // we can be more lenient in validation
             when (index) {
                 0 -> {
-                    val line1Valid = validateLine1Flexible(line)
-                    Log.d(TAG, "Line 1 validation: $line1Valid")
-                    if (line1Valid) {
+                    // First found line - validate against all patterns to determine type
+                    if (isLine1Pattern(line)) {
+                        hasLine1 = true
                         validLines++
-                        hasIdPattern = true
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 1")
+                    } else if (isLine2Pattern(line)) {
+                        hasLine2 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 2")
+                    } else if (isLine3Pattern(line)) {
+                        hasLine3 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 3")
+                    } else {
+                        Log.w(TAG, "Line ${index + 1} doesn't match any pattern")
                     }
                 }
                 1 -> {
-                    val line2Valid = validateLine2Flexible(line)
-                    Log.d(TAG, "Line 2 validation: $line2Valid")
-                    if (line2Valid) {
+                    // Second found line
+                    if (!hasLine1 && isLine1Pattern(line)) {
+                        hasLine1 = true
                         validLines++
-                        hasDatePattern = true
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 1")
+                    } else if (!hasLine2 && isLine2Pattern(line)) {
+                        hasLine2 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 2")
+                    } else if (!hasLine3 && isLine3Pattern(line)) {
+                        hasLine3 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 3")
+                    } else {
+                        Log.w(TAG, "Line ${index + 1} doesn't match expected pattern or is duplicate")
                     }
                 }
                 2 -> {
-                    val line3Valid = validateLine3Flexible(line)
-                    Log.d(TAG, "Line 3 validation: $line3Valid")
-                    if (line3Valid) {
+                    // Third found line
+                    if (!hasLine1 && isLine1Pattern(line)) {
+                        hasLine1 = true
                         validLines++
-                        hasNamePattern = true
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 1")
+                    } else if (!hasLine2 && isLine2Pattern(line)) {
+                        hasLine2 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 2")
+                    } else if (!hasLine3 && isLine3Pattern(line)) {
+                        hasLine3 = true
+                        validLines++
+                        Log.d(TAG, "Line ${index + 1} validated as MRZ Line 3")
+                    } else {
+                        Log.w(TAG, "Line ${index + 1} doesn't match expected pattern or is duplicate")
                     }
                 }
             }
         }
         
-        // En az 1 satır geçerli olmalı ve temel pattern'lar bulunmalı
-        val isValid = validLines >= 1 && (hasIdPattern || hasDatePattern || hasNamePattern)
+        // Success criteria: At least 2 valid MRZ lines, with Line1 or Line2 mandatory
+        val isValid = validLines >= 2 && (hasLine1 || hasLine2)
         
-        Log.d(TAG, "Valid lines: $validLines/${mrzLines.size}, hasId: $hasIdPattern, hasDate: $hasDatePattern, hasName: $hasNamePattern")
+        Log.d(TAG, "=== VALIDATION SUMMARY ===")
+        Log.d(TAG, "Valid pattern-matched lines: $validLines/${mrzLines.size}")
+        Log.d(TAG, "Has Line 1 (ID): $hasLine1")
+        Log.d(TAG, "Has Line 2 (Dates): $hasLine2") 
+        Log.d(TAG, "Has Line 3 (Names): $hasLine3")
         Log.d(TAG, "Overall MRZ validation result: $isValid")
         
         return isValid
+    }
+    
+    // Helper functions to identify line types
+    private fun isLine1Pattern(line: String): Boolean {
+        return line.startsWith("I") && line.contains("TUR") && line.count { it.isDigit() } >= 11
+    }
+    
+    private fun isLine2Pattern(line: String): Boolean {
+        return line.contains("TUR") && (line.contains("M") || line.contains("F")) && 
+               line.take(6).count { it.isDigit() } >= 5
+    }
+    
+    private fun isLine3Pattern(line: String): Boolean {
+        val letterCount = line.count { it.isLetter() }
+        val angleCount = line.count { it == '<' }
+        return letterCount >= 5 && (angleCount > 0 || line.contains("<<"))
     }
     
     private fun validateLine1(line: String): Boolean {
@@ -549,121 +615,489 @@ class TCMRZReader(private val context: Context) {
         return line.matches(Regex("[A-Z<]{30}"))
     }
 
-    // Esnek validation metodları - OCR hatalarına daha toleranslı
-    private fun validateLine1Flexible(line: String): Boolean {
-        if (line.length < 25 || line.length > 35) {
-            Log.d(TAG, "Line 1 length check failed: ${line.length}")
+    // Improved validation methods - OCR-tolerant but more structured
+    private fun validateLine1Improved(line: String): Boolean {
+        if (line.length != 30) {
+            Log.d(TAG, "Line 1 length check failed: ${line.length} (expected 30)")
             return false
         }
         
-        // I ile başlamalı ve TUR içermeli
-        val startsWithI = line.startsWith("I") || line.startsWith("1")
-        val containsTUR = line.contains("TUR") || line.contains("TU8") || line.contains("TU6")
-        val hasNumbers = line.any { it.isDigit() }
+        Log.d(TAG, "Validating Line 1: '$line'")
         
-        Log.d(TAG, "Line 1 flexible validation: startsWithI=$startsWithI, containsTUR=$containsTUR, hasNumbers=$hasNumbers")
+        // TC MRZ Line 1 structure: I[kurum]TUR[seri 9][kontrol][TC 11][dolgu 4]
+        // Check basic structure with OCR tolerance
+        val startsWithI = line[0] in "I1" // I or 1 (common OCR error)
+        val hasTUR = line.substring(2, 5) == "TUR" || 
+                     line.substring(1, 4) == "TUR" ||
+                     line.contains("TUR")
         
-        return startsWithI && (containsTUR || hasNumbers)
+        // Look for 11-digit TC number pattern (should be mostly digits)
+        val possibleTCSection = line.substring(15, 26)
+        val digitCount = possibleTCSection.count { it.isDigit() }
+        val hasTCPattern = digitCount >= 9 // At least 9 out of 11 should be digits
+        
+        Log.d(TAG, "Line 1 validation: startsWithI=$startsWithI, hasTUR=$hasTUR, hasTCPattern=$hasTCPattern (digits: $digitCount/11)")
+        Log.d(TAG, "Possible TC section: '$possibleTCSection'")
+        
+        return startsWithI && hasTUR && hasTCPattern
     }
     
-    private fun validateLine2Flexible(line: String): Boolean {
-        if (line.length < 25 || line.length > 35) {
-            Log.d(TAG, "Line 2 length check failed: ${line.length}")
+    private fun validateLine2Improved(line: String): Boolean {
+        if (line.length != 30) {
+            Log.d(TAG, "Line 2 length check failed: ${line.length} (expected 30)")
             return false
         }
         
-        // Başında tarih benzeri pattern (6 rakam) ve TUR içermeli
-        val startNumbers = line.take(6).count { it.isDigit() }
-        val containsTUR = line.contains("TUR") || line.contains("TU8") || line.contains("TU6") 
-        val hasGender = line.contains("M") || line.contains("F")
-        val hasNumbers = line.count { it.isDigit() } >= 12 // En az 12 rakam olmalı (tarihler)
+        Log.d(TAG, "Validating Line 2: '$line'")
         
-        Log.d(TAG, "Line 2 flexible validation: startNumbers=$startNumbers, containsTUR=$containsTUR, hasGender=$hasGender, hasNumbers=$hasNumbers")
+        // TC MRZ Line 2 structure: [doğum 6][kontrol][cinsiyet][geçerlilik 6][kontrol]TUR[uyruk 11][kontrol]
+        val birthDateSection = line.substring(0, 6)
+        val genderChar = line[7]
+        val expiryDateSection = line.substring(8, 14)
+        val hasTUR = line.substring(15, 18) == "TUR"
         
-        return startNumbers >= 4 && (containsTUR || hasGender || hasNumbers)
+        // Validate birth date (6 digits)
+        val birthDigitCount = birthDateSection.count { it.isDigit() }
+        val validBirthDate = birthDigitCount >= 5 // At least 5 out of 6 should be digits
+        
+        // Validate gender
+        val validGender = genderChar in "MF"
+        
+        // Validate expiry date (6 digits)
+        val expiryDigitCount = expiryDateSection.count { it.isDigit() }
+        val validExpiryDate = expiryDigitCount >= 5 // At least 5 out of 6 should be digits
+        
+        Log.d(TAG, "Line 2 validation: birthDate=$validBirthDate ($birthDigitCount/6), gender=$validGender ('$genderChar'), expiryDate=$validExpiryDate ($expiryDigitCount/6), TUR=$hasTUR")
+        
+        return validBirthDate && validGender && validExpiryDate && hasTUR
     }
     
-    private fun validateLine3Flexible(line: String): Boolean {
-        if (line.length < 25 || line.length > 35) {
-            Log.d(TAG, "Line 3 length check failed: ${line.length}")
+    private fun validateLine3Improved(line: String): Boolean {
+        if (line.length != 30) {
+            Log.d(TAG, "Line 3 length check failed: ${line.length} (expected 30)")
             return false
         }
         
-        // Çoğunlukla harf olmalı ve << pattern'ı içerebilir
+        Log.d(TAG, "Validating Line 3: '$line'")
+        
+        // TC MRZ Line 3 structure: [soyad]<<[ad]<[dolgu]
+        // Should contain mostly letters and < characters
         val letterCount = line.count { it.isLetter() }
-        val hasDoubleAngle = line.contains("<<") || line.contains("<") || line.contains(">>")
-        val letterPercentage = letterCount.toFloat() / line.length
+        val angleCount = line.count { it == '<' }
+        val validCharCount = letterCount + angleCount
+        val hasDoubleBracket = line.contains("<<")
         
-        Log.d(TAG, "Line 3 flexible validation: letterCount=$letterCount, hasDoubleAngle=$hasDoubleAngle, letterPercentage=${(letterPercentage * 100).toInt()}%")
+        // At least 80% should be valid MRZ name characters (letters + <)
+        val validCharPercentage = validCharCount.toFloat() / line.length
         
-        return letterPercentage > 0.6 // En az %60 harf
+        Log.d(TAG, "Line 3 validation: letters=$letterCount, angles=$angleCount, validChar%=${(validCharPercentage * 100).toInt()}%, hasDoubleBracket=$hasDoubleBracket")
+        
+        return validCharPercentage >= 0.8 && letterCount >= 5 // At least 5 letters for names
     }
 
     private fun extractPersonalInfo(mrzLines: List<String>): PersonalData? {
+        Log.d(TAG, "=== PATTERN-AWARE PERSONAL INFO EXTRACTION ===")
+        
         try {
-            if (mrzLines.size != 3) return null
+            if (mrzLines.isEmpty()) {
+                Log.w(TAG, "No MRZ lines for extraction")
+                return null
+            }
             
-            Log.d(TAG, "Extracting personal info from TC MRZ lines")
+            Log.d(TAG, "Extracting from ${mrzLines.size} pattern-matched MRZ lines:")
+            mrzLines.forEachIndexed { index, line ->
+                Log.d(TAG, "Line ${index + 1}: '$line'")
+            }
             
-            val line1 = mrzLines[0] // I + kurum + TUR + seri(9) + kontrol + TC(11) + dolgu(4)  
-            val line2 = mrzLines[1] // doğum(6) + kontrol + cinsiyet + geçerlilik(6) + kontrol + TUR + uyruk(11) + kontrol
-            val line3 = mrzLines[2] // soyad + << + ad + dolgu
+            // Initialize with defaults
+            var documentNumber = ""
+            var nationalId = ""
+            var birthDate = ""
+            var gender = ""
+            var expiryDate = ""
+            var nationality = "TUR"
+            var surname = ""
+            var name = ""
+            var secondName = ""
             
-            // TC MRZ format'ına göre extraction
-            // Line 1: I[kurum]TUR[seri 9][kontrol][TC 11][dolgu 4]
-            val documentType = line1.substring(0, 1) // "I"
-            val issuingAuthority = line1.substring(1, 2) // Kurum
-            val countryCode = line1.substring(2, 5) // "TUR"
-            val documentNumber = line1.substring(5, 14).trim('<') // Seri numarası
-            val nationalId = line1.substring(15, 26) // TC kimlik (11 rakam)
+            // Pattern-aware extraction - identify line types and extract accordingly
+            for (line in mrzLines) {
+                when {
+                    isLine1Pattern(line) -> {
+                        Log.d(TAG, "Extracting from Line 1 (ID): '$line'")
+                        
+                        // Extract document number (seri no) based on correct pattern
+                        try {
+                            val turIndex = line.indexOf("TUR")
+                            val tcPattern = Regex("\\d{11}")
+                            val tcMatch = tcPattern.find(line)
+                            
+                            if (tcMatch != null && turIndex >= 0) {
+                                nationalId = tcMatch.value
+                                
+                                // TC MRZ Line 1 doğru yapısı: I[dolgu 1]TUR[seri 9][kontrol 1][dolgu 1][TC 11][dolgu 3]
+                                val seriStart = turIndex + 3 // TUR sonrası
+                                val seriEnd = seriStart + 9 // Seri no tam 9 karakter
+                                
+                                if (seriEnd <= line.length) {
+                                    val seriNo = line.substring(seriStart, seriEnd)
+                                    
+                                    // SADECE uzunluk kontrolü
+                                    if (seriNo.length != 9) {
+                                        Log.e(TAG, "❌ Seri no length error! Expected 9, got ${seriNo.length}: '$seriNo'")
+                                        return null // Uzunluk hatası - retry
+                                    }
+                                    
+                                    documentNumber = seriNo
+                                    
+                                    Log.d(TAG, "✅ Document number extracted: '$seriNo' (${seriNo.length} chars)")
+                                    Log.d(TAG, "✅ National ID extracted: '$nationalId'")
+                                    
+                                } else {
+                                    Log.e(TAG, "❌ Line too short for seri no extraction")
+                                    return null
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error extracting from Line 1: ${e.message}")
+                            return null
+                        }
+                    }
+                    
+                    isLine2Pattern(line) -> {
+                        Log.d(TAG, "Extracting from Line 2 (Dates/Gender): '$line'")
+                        
+                        try {
+                            // Extract birth date (first 6 digits)
+                            val birthDateMrz = line.take(6)
+                            if (birthDateMrz.all { it.isDigit() }) {
+                                birthDate = formatTCDate(birthDateMrz, isExpiryDate = false)
+                                Log.d(TAG, "Birth date: '$birthDateMrz' -> '$birthDate'")
+                            }
+                            
+                            // Extract gender (M or F)
+                            val mIndex = line.indexOf("M")
+                            val fIndex = line.indexOf("F")
+                            gender = when {
+                                mIndex >= 0 -> "M"
+                                fIndex >= 0 -> "F"
+                                else -> ""
+                            }
+                            Log.d(TAG, "Gender: '$gender'")
+                            
+                            // Extract expiry date (look for 6 digits after gender)
+                            val genderIndex = maxOf(mIndex, fIndex)
+                            if (genderIndex >= 0) {
+                                val afterGender = line.substring(genderIndex + 1)
+                                val expiryPattern = Regex("\\d{6}")
+                                val expiryMatch = expiryPattern.find(afterGender)
+                                
+                                if (expiryMatch != null) {
+                                    val expiryDateMrz = expiryMatch.value
+                                    expiryDate = formatTCDate(expiryDateMrz, isExpiryDate = true)
+                                    Log.d(TAG, "Expiry date: '$expiryDateMrz' -> '$expiryDate'")
+                                }
+                            }
+                            
+                            // Extract nationality (should be TUR)
+                            if (line.contains("TUR")) {
+                                nationality = "TUR"
+                            }
+                            
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error extracting from Line 2: ${e.message}")
+                        }
+                    }
+                    
+                    isLine3Pattern(line) -> {
+                        Log.d(TAG, "Extracting from Line 3 (Names): '$line'")
+                        
+                        try {
+                            // GELIŞMIŞ İSIM PARSING: SOYAD<<ISIM<IKINCI_ISIM<<<<<<
+                            Log.d(TAG, "Advanced name parsing for: '$line'")
+                            
+                            val doubleBracketIndex = line.indexOf("<<")
+                            if (doubleBracketIndex > 0) {
+                                // Soyadı al (ilk << öncesi)
+                                surname = line.substring(0, doubleBracketIndex).replace("<", "").trim()
+                                
+                                // << sonrası kısmı al
+                                val afterDoubleBracket = line.substring(doubleBracketIndex + 2)
+                                Log.d(TAG, "After '<<': '$afterDoubleBracket'")
+                                
+                                // < karakterlerine göre böl
+                                val nameParts = afterDoubleBracket.split("<").filter { it.isNotEmpty() }
+                                
+                                name = nameParts.getOrNull(0)?.trim() ?: ""
+                                secondName = nameParts.getOrNull(1)?.trim() ?: ""
+                                
+                                Log.d(TAG, "Name parts: ${nameParts.size} -> [${nameParts.joinToString(", ")}]")
+                                
+                            } else {
+                                // Fallback: tek < ile ayrılmış durumu handle et
+                                val parts = line.replace("<", " ").trim().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+                                surname = parts.getOrNull(0)?.trim() ?: ""
+                                name = parts.getOrNull(1)?.trim() ?: ""
+                                secondName = parts.getOrNull(2)?.trim() ?: ""
+                                
+                                Log.d(TAG, "Fallback parsing: ${parts.size} parts -> [${parts.joinToString(", ")}]")
+                            }
+                            
+                            Log.d(TAG, "Names extracted: surname='$surname', name='$name', secondName='$secondName'")
+                            
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error extracting from Line 3: ${e.message}")
+                        }
+                    }
+                    
+                    else -> {
+                        Log.w(TAG, "Unknown line pattern: '$line'")
+                    }
+                }
+            }
             
-            // Line 2: [doğum 6][kontrol][cinsiyet][geçerlilik 6][kontrol]TUR[uyruk 11][kontrol]
-            val birthDateMrz = line2.substring(0, 6)
-            val birthDate = formatTCDate(birthDateMrz) // YYMMDD -> YYYY-MM-DD
-            val gender = line2.substring(7, 8) // M veya F
-            val expiryDateMrz = line2.substring(8, 14) 
-            val expiryDate = formatTCDate(expiryDateMrz) // YYMMDD -> YYYY-MM-DD
-            val nationality = line2.substring(15, 18) // "TUR"
+            // Tarih doğrulaması yap
+            val datesValid = validateDateLogic(birthDate, expiryDate)
+            if (!datesValid) {
+                Log.e(TAG, "Date validation failed! Birth: $birthDate, Expiry: $expiryDate")
+                Log.e(TAG, "Expiry date cannot be before birth date. Rejecting MRZ data.")
+                return null // Tarih mantık hatası - okumayı reddet
+            }
             
-            // Line 3: [soyad]<<[ad]<dolgu karakterleri
-            // Soyad ve ad arasında "<<" var, ad sonrası dolgu için "<" karakterleri
-            val nameSection = line3.replace("<", " ").trim()
-            val nameParts = nameSection.split("  ").filter { it.isNotEmpty() }
-            val surname = nameParts.getOrNull(0)?.trim() ?: ""
-            val name = nameParts.getOrNull(1)?.trim() ?: ""
-            
-            Log.d(TAG, "Extracted personal data: $surname, $name, $nationalId")
-            
-            return PersonalData(
+            val extractedData = PersonalData(
                 documentNumber = documentNumber,
                 nationalId = nationalId,
                 name = name,
                 surname = surname,
+                secondName = secondName,
                 birthDate = birthDate,
                 gender = gender,
                 expiryDate = expiryDate,
                 nationality = nationality
             )
             
+            Log.d(TAG, "=== EXTRACTION COMPLETE ===")
+            Log.d(TAG, "Final extracted data: $extractedData")
+            Log.d(TAG, "Date validation: PASSED ✅")
+            
+            return extractedData
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting personal info: ${e.message}")
+            Log.e(TAG, "Error in pattern-aware extraction: ${e.message}", e)
             return null
         }
     }
 
-    private fun formatTCDate(dateStr: String): String {
+    private fun formatTCDate(dateStr: String, isExpiryDate: Boolean = false): String {
         if (dateStr.length != 6) return dateStr
         
-        // TC MRZ formatı: YYMMDD (yıl son 2 hane + ay + gün)
-        // Örnek: 040314 -> 14.03.2004 -> 2004-03-14
-        val yy = dateStr.substring(0, 2).toIntOrNull() ?: return dateStr
-        val mm = dateStr.substring(2, 4)
-        val dd = dateStr.substring(4, 6)
+        try {
+            // TC MRZ formatı: YYMMDD (yıl son 2 hane + ay + gün)
+            // Örnek: 040314 -> 04 03 14 -> 2004/03/14 -> 14.03.2004
+            val yy = dateStr.substring(0, 2).toIntOrNull() ?: return dateStr
+            val mm = dateStr.substring(2, 4)
+            val dd = dateStr.substring(4, 6)
+            
+            // Yıl hesaplama
+            val yyyy = if (isExpiryDate) {
+                // Geçerlilik tarihleri her zaman 2000 sonrası (yeni sistem)
+                2000 + yy
+            } else {
+                // Doğum tarihleri için mantıklı aralık
+                // 0-30 arası: 2000-2030 (yeni doğumlar)
+                // 31-99 arası: 1931-1999 (geçmiş doğumlar)
+                if (yy <= 30) {
+                    2000 + yy // 2000-2030
+                } else {
+                    1900 + yy // 1931-1999
+                }
+            }
+            
+            Log.d(TAG, "Date parsing: '$dateStr' -> YY=$yy MM=$mm DD=$dd -> Year=$yyyy (isExpiry=$isExpiryDate) -> Final: $dd.$mm.$yyyy")
+            
+            // Türk formatı: GG.AA.YYYY
+            return "$dd.$mm.$yyyy"
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Error parsing date '$dateStr': ${e.message}")
+            return dateStr
+        }
+    }
+    
+    // Tarih doğrulama fonksiyonu
+    private fun validateDateLogic(birthDate: String, expiryDate: String): Boolean {
+        try {
+            if (birthDate.isEmpty() || expiryDate.isEmpty()) {
+                Log.w(TAG, "Date validation failed: Empty dates")
+                return false
+            }
+            
+            // GG.AA.YYYY formatından Date objelerine çevir
+            val birthParts = birthDate.split(".")
+            val expiryParts = expiryDate.split(".")
+            
+            if (birthParts.size != 3 || expiryParts.size != 3) {
+                Log.w(TAG, "Date validation failed: Invalid format")
+                return false
+            }
+            
+            val birthYear = birthParts[2].toIntOrNull() ?: return false
+            val birthMonth = birthParts[1].toIntOrNull() ?: return false
+            val birthDay = birthParts[0].toIntOrNull() ?: return false
+            
+            val expiryYear = expiryParts[2].toIntOrNull() ?: return false
+            val expiryMonth = expiryParts[1].toIntOrNull() ?: return false
+            val expiryDay = expiryParts[0].toIntOrNull() ?: return false
+            
+            // Basit karşılaştırma: geçerlilik tarihi doğum tarihinden sonra olmalı
+            val birthTimestamp = birthYear * 10000 + birthMonth * 100 + birthDay
+            val expiryTimestamp = expiryYear * 10000 + expiryMonth * 100 + expiryDay
+            
+            val isValid = expiryTimestamp > birthTimestamp
+            
+            Log.d(TAG, "Date validation: Birth=$birthDate ($birthTimestamp), Expiry=$expiryDate ($expiryTimestamp) -> Valid=$isValid")
+            
+            return isValid
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Date validation error: ${e.message}")
+            return false
+        }
+    }
+
+    // Pattern-based MRZ Detection Helper Functions
+    private fun findMRZLine1Pattern(allLines: List<String>): String? {
+        Log.d(TAG, "Searching for MRZ Line 1 pattern...")
         
-        // Yıl hesaplama (2000-2099 arası varsayım)
-        val yyyy = if (yy > 50) "19$yy" else "20$yy" // 50+ ise 19XX, altı ise 20XX
+        for (line in allLines) {
+            val cleanLine = line.trim()
+                .replace(Regex("\\s+"), "") // Remove spaces
+                .replace("«", "<") // Fix OCR error: « -> <
+                .replace("»", "<") // Fix OCR error: » -> <
+                .uppercase()
+            Log.d(TAG, "Testing line for Line 1 pattern: '$cleanLine'")
+            
+            // TC MRZ Line 1 pattern: I[kurum]TUR[seri 9][kontrol][TC 11][dolgu 4]
+            // Flexible matching for OCR errors
+            if (cleanLine.length >= 28 && cleanLine.length <= 32) {
+                val startsWithI = cleanLine.startsWith("I") || cleanLine.startsWith("1")
+                val containsTUR = cleanLine.contains("TUR")
+                
+                if (startsWithI && containsTUR) {
+                    // Look for TC number pattern (11 consecutive digits)
+                    val tcPattern = Regex("\\d{11}")
+                    val tcMatch = tcPattern.find(cleanLine)
+                    
+                    if (tcMatch != null) {
+                        // TC MRZ Line 1 yapısı: I[dolgu 1]TUR[seri 9][kontrol 1][dolgu 1][TC 11][dolgu 3]
+                        val turIndex = cleanLine.indexOf("TUR")
+                        val tcStartIndex = tcMatch.range.first
+                        
+                        if (turIndex >= 0 && tcStartIndex > turIndex + 3) {
+                            // Seri no = TUR sonrası 9 karakter
+                            val seriStart = turIndex + 3
+                            val seriEnd = seriStart + 9 // Seri no tam 9 karakter
+                            
+                            if (seriEnd < cleanLine.length) {
+                                val seriNo = cleanLine.substring(seriStart, seriEnd)
+                                
+                                // SADECE uzunluk kontrolü
+                                if (seriNo.length != 9) {
+                                    Log.w(TAG, "❌ Seri no length error! Expected 9, found ${seriNo.length}. Rejecting line.")
+                                    continue // Bu satırı reddet
+                                }
+                                
+                                Log.d(TAG, "✅ Seri no length OK: '$seriNo' (${seriNo.length} chars)")
+                            }
+                        }
+                        
+                        val normalizedLine = if (cleanLine.length == 30) cleanLine else cleanLine.padEnd(30, '<').take(30)
+                        Log.d(TAG, "Found valid MRZ Line 1: '$normalizedLine'")
+                        return normalizedLine
+                    }
+                }
+            }
+        }
         
-        return "$yyyy-$mm-$dd"
+        Log.d(TAG, "No MRZ Line 1 pattern found")
+        return null
+    }
+
+    private fun findMRZLine2Pattern(allLines: List<String>): String? {
+        Log.d(TAG, "Searching for MRZ Line 2 pattern...")
+        
+        for (line in allLines) {
+            val cleanLine = line.trim()
+                .replace(Regex("\\s+"), "") // Remove spaces
+                .replace("«", "<") // Fix OCR error: « -> <
+                .replace("»", "<") // Fix OCR error: » -> <
+                .uppercase()
+            Log.d(TAG, "Testing line for Line 2 pattern: '$cleanLine'")
+            
+            // TC MRZ Line 2 pattern: [doğum 6][kontrol][M/F][geçerlilik 6][kontrol]TUR[uyruk 11][kontrol]
+            if (cleanLine.length >= 28 && cleanLine.length <= 32) {
+                val containsTUR = cleanLine.contains("TUR")
+                val containsGender = cleanLine.contains("M") || cleanLine.contains("F")
+                
+                if (containsTUR && containsGender) {
+                    // Check for date patterns (at least 12 digits for two dates)
+                    val digitCount = cleanLine.count { it.isDigit() }
+                    
+                    if (digitCount >= 12) {
+                        // Look for birth date pattern at the beginning (6 digits)
+                        val birthDatePattern = Regex("^\\d{6}")
+                        val birthMatch = birthDatePattern.find(cleanLine)
+                        
+                        if (birthMatch != null) {
+                            val normalizedLine = if (cleanLine.length == 30) cleanLine else cleanLine.padEnd(30, '<').take(30)
+                            Log.d(TAG, "Found potential MRZ Line 2: '$normalizedLine'")
+                            return normalizedLine
+                        }
+                    }
+                }
+            }
+        }
+        
+        Log.d(TAG, "No MRZ Line 2 pattern found")
+        return null
+    }
+
+    private fun findMRZLine3Pattern(allLines: List<String>): String? {
+        Log.d(TAG, "Searching for MRZ Line 3 pattern...")
+        
+        for (line in allLines) {
+            val cleanLine = line.trim()
+                .replace(Regex("\\s+"), "") // Remove spaces
+                .replace("«", "<") // Fix OCR error: « -> <
+                .replace("»", "<") // Fix OCR error: » -> <
+                .uppercase()
+            Log.d(TAG, "Testing line for Line 3 pattern: '$cleanLine'")
+            
+            // TC MRZ Line 3 pattern: [SURNAME]<<[NAME]<<<<<<<< (names with << separator)
+            if (cleanLine.length >= 25 && cleanLine.length <= 35) {
+                val letterCount = cleanLine.count { it.isLetter() }
+                val angleCount = cleanLine.count { it == '<' }
+                val validCharCount = letterCount + angleCount
+                
+                // Must be mostly letters and angle brackets
+                val validCharPercentage = validCharCount.toFloat() / cleanLine.length
+                
+                if (validCharPercentage > 0.8 && letterCount >= 5) {
+                    // Look for name separator patterns
+                    val hasDoubleBracket = cleanLine.contains("<<")
+                    val hasSingleBrackets = cleanLine.contains("<")
+                    
+                    if (hasDoubleBracket || hasSingleBrackets) {
+                        val normalizedLine = if (cleanLine.length == 30) cleanLine else cleanLine.padEnd(30, '<').take(30)
+                        Log.d(TAG, "Found potential MRZ Line 3: '$normalizedLine'")
+                        return normalizedLine
+                    }
+                }
+            }
+        }
+        
+        Log.d(TAG, "No MRZ Line 3 pattern found")
+        return null
     }
 
     private fun validateCheckDigits(mrzLines: List<String>): Boolean {

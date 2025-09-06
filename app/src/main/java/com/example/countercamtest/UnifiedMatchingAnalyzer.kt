@@ -24,6 +24,7 @@ class UnifiedMatchingAnalyzer(
         private const val TAG = "UnifiedMatchingAnalyzer"
         private const val ANALYSIS_INTERVAL_MS = 1000L // Optimized interval for better performance
         private const val MAX_CONSECUTIVE_FAILURES = 5
+        private const val SUCCESS_PAUSE_DURATION = 5000L // 5 seconds pause after success
     }
 
     private var lastAnalysisTime = 0L
@@ -38,9 +39,35 @@ class UnifiedMatchingAnalyzer(
     // Adaptive analysis parameters
     private var currentInterval = ANALYSIS_INTERVAL_MS
     private var lastSuccessTime = 0L
+    
+    // State management for stopping analysis after success
+    private var isAnalysisEnabled = true
+    private var hasFoundValidMRZ = false
+    private var successfulMRZResult: UnifiedMatchingValidator.UnifiedValidationResult? = null
 
     override fun analyze(image: ImageProxy) {
         val currentTime = System.currentTimeMillis()
+
+        // Check if analysis should be paused after successful MRZ reading
+        if (hasFoundValidMRZ && successfulMRZResult?.mrzData?.success == true) {
+            Log.d(TAG, "Analysis paused - Valid MRZ already found")
+            image.close()
+            return
+        }
+
+        // Check if analysis is disabled
+        if (!isAnalysisEnabled) {
+            Log.d(TAG, "Analysis disabled")
+            image.close()
+            return
+        }
+
+        // Pause after recent success to allow user to view results
+        if (lastSuccessTime > 0 && (currentTime - lastSuccessTime) < SUCCESS_PAUSE_DURATION) {
+            Log.d(TAG, "Analysis paused after recent success")
+            image.close()
+            return
+        }
 
         // Adaptive interval based on recent performance
         if (consecutiveFailures > 3) {
@@ -85,6 +112,14 @@ class UnifiedMatchingAnalyzer(
                         "Rotation=${String.format("%.1f", result.rotationAngle)}°, " +
                         "Processing=${result.processingTimeMs}ms, " +
                         "Total=${analysisTime}ms")
+
+                // Check if we have a successful MRZ result
+                if (result.mrzData?.success == true) {
+                    Log.i(TAG, "🎉 SUCCESSFUL MRZ READING - STOPPING ANALYSIS")
+                    hasFoundValidMRZ = true
+                    successfulMRZResult = result
+                    isAnalysisEnabled = false
+                }
 
                 // Call result callback on main thread
                 launch(Dispatchers.Main) {
@@ -259,4 +294,21 @@ class UnifiedMatchingAnalyzer(
         overlayBounds = bounds
         Log.d(TAG, "Overlay bounds updated: $bounds")
     }
+    
+    // Methods to control analysis state
+    fun enableAnalysis() {
+        isAnalysisEnabled = true
+        hasFoundValidMRZ = false
+        successfulMRZResult = null
+        Log.d(TAG, "Analysis enabled - reset to initial state")
+    }
+    
+    fun disableAnalysis() {
+        isAnalysisEnabled = false
+        Log.d(TAG, "Analysis disabled")
+    }
+    
+    fun hasValidMRZResult(): Boolean = hasFoundValidMRZ && successfulMRZResult?.mrzData?.success == true
+    
+    fun getSuccessfulResult(): UnifiedMatchingValidator.UnifiedValidationResult? = successfulMRZResult
 }

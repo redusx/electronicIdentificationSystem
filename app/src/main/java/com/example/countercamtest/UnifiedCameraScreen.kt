@@ -38,7 +38,9 @@ import java.util.concurrent.Executors
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun UnifiedCameraScreen() {
+fun UnifiedCameraScreen(
+    onNavigateToMRZResult: (TCMRZReader.TCMRZResult) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -53,9 +55,25 @@ fun UnifiedCameraScreen() {
     var isAnalyzing by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var showPerformanceStats by remember { mutableStateOf(false) }
+    
+    // MRZ navigation state
+    var shouldNavigateToMRZ by remember { mutableStateOf(false) }
+    var mrzResultForNavigation by remember { mutableStateOf<TCMRZReader.TCMRZResult?>(null) }
 
     // Camera executor
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    
+    // Analyzer reference for controlling analysis
+    var analyzerRef by remember { mutableStateOf<UnifiedMatchingAnalyzer?>(null) }
+
+    // Handle navigation after successful MRZ reading
+    LaunchedEffect(shouldNavigateToMRZ, mrzResultForNavigation) {
+        if (shouldNavigateToMRZ && mrzResultForNavigation != null) {
+            kotlinx.coroutines.delay(1500) // Wait 1.5 seconds to show success message
+            onNavigateToMRZResult(mrzResultForNavigation!!)
+            shouldNavigateToMRZ = false // Reset navigation state
+        }
+    }
 
     // Cleanup
     DisposableEffect(Unit) {
@@ -75,9 +93,22 @@ fun UnifiedCameraScreen() {
                 validator = unifiedValidator,
                 onValidationResult = { result ->
                     validationResult = result
+                    
+                    // Check if we have a successful MRZ result
+                    if (result.mrzData?.success == true && !shouldNavigateToMRZ) {
+                        Log.i("UnifiedCameraScreen", "Successful MRZ reading detected - preparing for navigation")
+                        mrzResultForNavigation = result.mrzData
+                        shouldNavigateToMRZ = true
+                        
+                        // Stop the analyzer
+                        analyzerRef?.disableAnalysis()
+                    }
                 },
                 onAnalysisStateChange = { analyzing ->
                     isAnalyzing = analyzing
+                },
+                onAnalyzerCreated = { analyzer ->
+                    analyzerRef = analyzer
                 }
             )
 
@@ -104,7 +135,8 @@ fun UnifiedCameraPreview(
     executor: ExecutorService,
     validator: UnifiedMatchingValidator,
     onValidationResult: (UnifiedMatchingValidator.UnifiedValidationResult) -> Unit,
-    onAnalysisStateChange: (Boolean) -> Unit
+    onAnalysisStateChange: (Boolean) -> Unit,
+    onAnalyzerCreated: (UnifiedMatchingAnalyzer) -> Unit = {}
 ) {
     val previewView = remember { PreviewView(context) }
 
@@ -116,7 +148,8 @@ fun UnifiedCameraPreview(
             executor = executor,
             validator = validator,
             onValidationResult = onValidationResult,
-            onAnalysisStateChange = onAnalysisStateChange
+            onAnalysisStateChange = onAnalysisStateChange,
+            onAnalyzerCreated = onAnalyzerCreated
         )
     }
 
@@ -133,7 +166,8 @@ private fun setupUnifiedCamera(
     executor: ExecutorService,
     validator: UnifiedMatchingValidator,
     onValidationResult: (UnifiedMatchingValidator.UnifiedValidationResult) -> Unit,
-    onAnalysisStateChange: (Boolean) -> Unit
+    onAnalysisStateChange: (Boolean) -> Unit,
+    onAnalyzerCreated: (UnifiedMatchingAnalyzer) -> Unit = {}
 ) {
     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
 
@@ -149,19 +183,21 @@ private fun setupUnifiedCamera(
                 }
 
             // Image analysis use case - optimized for unified matching
+            val unifiedAnalyzer = UnifiedMatchingAnalyzer(validator, { result ->
+                onAnalysisStateChange(false)
+                onValidationResult(result)
+            })
+            
+            // Notify that analyzer is created
+            onAnalyzerCreated(unifiedAnalyzer)
+            
             val imageAnalyzer = ImageAnalysis.Builder()
                 .setTargetResolution(android.util.Size(1920, 1080)) // High resolution for better matching
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setImageQueueDepth(1) // Minimal queue for real-time processing
                 .build()
                 .also { analysis ->
-                    analysis.setAnalyzer(
-                        executor,
-                        UnifiedMatchingAnalyzer(validator, { result ->
-                            onAnalysisStateChange(false)
-                            onValidationResult(result)
-                        })
-                    )
+                    analysis.setAnalyzer(executor, unifiedAnalyzer)
                 }
 
             // Camera selector - prefer back camera for better image quality
