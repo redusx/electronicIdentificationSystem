@@ -111,6 +111,7 @@ dependencies {
 // 5. MLKit Text Recognition (Tesseract yerine)
     implementation("com.google.mlkit:text-recognition:16.0.1")
 
-
+// 6. Navigation Compose
+    implementation("androidx.navigation:navigation-compose:2.7.7")
 
 }

@@ -36,6 +36,9 @@ import java.util.concurrent.Executors
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.opencv.core.Point
 import org.opencv.core.Size
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -47,7 +50,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    CameraScreen()
+                    AppNavigation()
                 }
             }
         }
@@ -55,7 +58,50 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun CameraScreen() {
+private fun AppNavigation() {
+    val navController = rememberNavController()
+    var currentMRZResult by remember { mutableStateOf<TCMRZReader.TCMRZResult?>(null) }
+    
+    NavHost(
+        navController = navController,
+        startDestination = "camera"
+    ) {
+        composable("camera") {
+            CameraScreen(
+                onMRZDetected = { mrzResult ->
+                    // Store the MRZ result and navigate
+                    currentMRZResult = mrzResult
+                    if (mrzResult.success) {
+                        navController.navigate("mrz_result")
+                    }
+                }
+            )
+        }
+        
+        composable("mrz_result") {
+            currentMRZResult?.let { mrzResult ->
+                MRZResultScreen(
+                    mrzResult = mrzResult,
+                    onNavigateBack = {
+                        navController.navigate("camera") {
+                            popUpTo("mrz_result") { inclusive = true }
+                        }
+                    }
+                )
+            } ?: run {
+                // Fallback if no MRZ result is available
+                navController.navigate("camera") {
+                    popUpTo("mrz_result") { inclusive = true }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraScreen(
+    onMRZDetected: (TCMRZReader.TCMRZResult) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasPermission by remember { mutableStateOf(false) }
@@ -75,6 +121,11 @@ private fun CameraScreen() {
     // UnifiedMatchingValidator kullan
     val unifiedValidator = remember { UnifiedMatchingValidator(context) }
     var unifiedValidationResult by remember { mutableStateOf<UnifiedMatchingValidator.UnifiedValidationResult?>(null) }
+    
+    // MRZ okuma durumu
+    var cardDetected by remember { mutableStateOf(false) }
+    var mrzProcessing by remember { mutableStateOf(false) }
+    var mrzProcessed by remember { mutableStateOf(false) }
 
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
     var camera by remember { mutableStateOf<Camera?>(null) }
@@ -83,8 +134,28 @@ private fun CameraScreen() {
         UnifiedMatchingAnalyzer(unifiedValidator, { result ->
             mainExecutor.execute {
                 unifiedValidationResult = result
-                if (result.isValid) {
-                    Log.i("MainActivity", "CARD FOUND! Confidence: ${result.confidence}")
+                
+                // Kart tespit edildiğinde ve henüz MRZ işlemi yapılmadıysa
+                if (result.isValid && !cardDetected && !mrzProcessing && !mrzProcessed) {
+                    Log.i("MainActivity", "CARD DETECTED! Starting MRZ processing...")
+                    cardDetected = true
+                    mrzProcessing = true
+                    
+                    // MRZ okumasını hemen başlat
+                    result.mrzData?.let { mrzResult ->
+                        if (mrzResult.success) {
+                            mrzProcessed = true
+                            mrzProcessing = false
+                            Log.i("MainActivity", "MRZ READ SUCCESS! Navigating to results...")
+                            onMRZDetected(mrzResult)
+                        } else {
+                            mrzProcessing = false
+                            Log.w("MainActivity", "MRZ read failed: ${mrzResult.errorMessage}")
+                        }
+                    } ?: run {
+                        mrzProcessing = false
+                        Log.w("MainActivity", "No MRZ data available")
+                    }
                 }
             }
         })
@@ -123,79 +194,77 @@ private fun CameraScreen() {
             isCardDetected = unifiedValidationResult?.isValid == true
         )
 
-        // MRZ ve güven skorunu göster
-        unifiedValidationResult?.let { result ->
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "Güven: ${(result.confidence * 100).toInt()}%",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                
-                result.mrzData?.let { tcMrz ->
-                    if (tcMrz.success) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "📄 TC MRZ Başarıyla Okundu",
-                            color = Color.Green,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        tcMrz.data?.let { data ->
-                            if (data.documentNumber.isNotEmpty()) {
-                                Text(
-                                    text = "Belge No: ${data.documentNumber}",
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (data.name.isNotEmpty() || data.surname.isNotEmpty()) {
-                                Text(
-                                    text = "Ad Soyad: ${data.name} ${data.surname}",
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (data.nationalId.isNotEmpty()) {
-                                Text(
-                                    text = "TC No: ${data.nationalId}",
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (data.birthDate.isNotEmpty()) {
-                                Text(
-                                    text = "Doğum: ${data.birthDate}",
-                                    color = Color.White,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                        Text(
-                            text = "MRZ Güven: ${tcMrz.confidence.toInt()}%",
-                            color = Color.White,
-                            fontSize = 12.sp
-                        )
-                    } else if (result.isValid) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "📄 MRZ Okunamadı",
-                            color = Color.Yellow,
-                            fontSize = 12.sp
-                        )
-                        tcMrz.errorMessage?.let { error ->
-                            Text(
-                                text = error,
-                                color = Color.Red,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
+        // Durum göstergesi
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            when {
+                mrzProcessed -> {
+                    Text(
+                        text = "✅ MRZ Başarıyla Okundu!",
+                        color = Color.Green,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "🔄 Sonuç sayfasına yönlendiriliyor...",
+                        color = Color.Cyan,
+                        fontSize = 14.sp
+                    )
+                }
+                mrzProcessing -> {
+                    Text(
+                        text = "🔄 MRZ Okunuyor...",
+                        color = Color.Yellow,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Lütfen kartı sabit tutun",
+                        color = Color.White,
+                        fontSize = 12.sp
+                    )
+                }
+                cardDetected -> {
+                    Text(
+                        text = "📄 Kart Tespit Edildi!",
+                        color = Color.Green,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "MRZ okuma başlatılıyor...",
+                        color = Color.White,
+                        fontSize = 12.sp
+                    )
+                }
+                unifiedValidationResult?.isValid == true -> {
+                    Text(
+                        text = "🎯 Kart Tanınıyor...",
+                        color = Color(0xFFFF9800),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Güven: ${(unifiedValidationResult!!.confidence * 100).toInt()}%",
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                }
+                else -> {
+                    Text(
+                        text = "📷 Kart Aranıyor...",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "TC Kimlik kartınızı kameraya gösterin",
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }

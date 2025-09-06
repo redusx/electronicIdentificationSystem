@@ -121,11 +121,26 @@ class TCMRZReader(private val context: Context) {
                 )
             }
 
-            // 2. MRZ Alan Tespiti ve Ön İşleme (overlay bounds kullan)
-            val preprocessedBitmap = preprocessImageForMRZ(inputBitmap, overlayBounds)
+            // 2. Try MLKit OCR first with original image (no preprocessing)
+            Log.d(TAG, "Testing MLKit OCR with original image first...")
+            val originalOcrText = performMLKitOCR(inputBitmap)
             
-            // 3. MLKit OCR İşlemi
-            val ocrText = performMLKitOCR(preprocessedBitmap)
+            // 3. If original failed, try with preprocessed MRZ area
+            val ocrText = if (originalOcrText.isNotEmpty()) {
+                Log.d(TAG, "Original image OCR succeeded, using result")
+                originalOcrText
+            } else {
+                Log.d(TAG, "Original image OCR failed, trying with MRZ preprocessing...")
+                val preprocessedBitmap = preprocessImageForMRZ(inputBitmap, overlayBounds)
+                val processedOcrText = performMLKitOCR(preprocessedBitmap)
+                
+                // Cleanup preprocessed bitmap if different from input
+                if (preprocessedBitmap != inputBitmap) {
+                    preprocessedBitmap.recycle()
+                }
+                
+                processedOcrText
+            }
             
             // 4. MRZ Format Doğrulama
             val mrzLines = parseMRZLines(ocrText)
@@ -150,11 +165,6 @@ class TCMRZReader(private val context: Context) {
             val processingTime = System.currentTimeMillis() - startTime
             
             Log.d(TAG, "TC MRZ reading completed: Success=$isValid, Confidence=$confidence, Time=${processingTime}ms")
-            
-            // Cleanup
-            if (preprocessedBitmap != inputBitmap) {
-                preprocessedBitmap.recycle()
-            }
 
             return TCMRZResult(
                 success = isValid,
@@ -187,7 +197,7 @@ class TCMRZReader(private val context: Context) {
     }
 
     private fun preprocessImageForMRZ(inputBitmap: Bitmap, overlayBounds: android.graphics.Rect? = null): Bitmap {
-        Log.d(TAG, "Starting MRZ preprocessing pipeline")
+        Log.d(TAG, "Starting simplified MRZ preprocessing pipeline")
         
         // Convert to OpenCV Mat
         val inputMat = Mat()
@@ -218,20 +228,20 @@ class TCMRZReader(private val context: Context) {
             val mrzStartX = detectedPoint.x.toInt()
             val mrzStartY = detectedPoint.y.toInt()
             
-            // Template boyutlarını ekran boyutuna göre scale et
+            // Template boyutlarını ekran boyutuna göre scale et - daha büyük area kullan
             val scaleX = width.toDouble() / 2992.0 // Kamera çözünürlüğü referans
             val scaleY = height.toDouble() / 2992.0
             
-            val scaledWidth = (templateWidth * scaleX).toInt()
-            val scaledHeight = (templateHeight * scaleY).toInt()
+            val scaledWidth = (templateWidth * scaleX * 1.2).toInt() // %20 daha geniş
+            val scaledHeight = (templateHeight * scaleY * 1.5).toInt() // %50 daha yüksek
             
             Log.d(TAG, "Template MRZ detected at: $mrzStartX,$mrzStartY size ${scaledWidth}x${scaledHeight}")
             
             // Güvenlik marjinleri ekle
-            val safeStartX = maxOf(0, mrzStartX - 10)
-            val safeStartY = maxOf(0, mrzStartY - 5)
-            val safeWidth = minOf(width - safeStartX, scaledWidth + 20)
-            val safeHeight = minOf(height - safeStartY, scaledHeight + 10)
+            val safeStartX = maxOf(0, mrzStartX - 20)
+            val safeStartY = maxOf(0, mrzStartY - 15)
+            val safeWidth = minOf(width - safeStartX, scaledWidth + 40)
+            val safeHeight = minOf(height - safeStartY, scaledHeight + 30)
             
             android.graphics.Rect(safeStartX, safeStartY, safeStartX + safeWidth, safeStartY + safeHeight)
         } else if (overlayBounds != null) {
@@ -240,8 +250,8 @@ class TCMRZReader(private val context: Context) {
             
             val overlayStartY = overlayBounds.top
             val overlayHeight = overlayBounds.height()
-            val mrzStartY = overlayStartY + (overlayHeight * 0.85).toInt()
-            val mrzHeight = (overlayHeight * 0.15).toInt()
+            val mrzStartY = overlayStartY + (overlayHeight * 0.80).toInt() // Biraz daha yukarıdan başla
+            val mrzHeight = (overlayHeight * 0.20).toInt() // Daha yüksek alan
             
             val mrzStartX = overlayBounds.left + (overlayBounds.width() * 0.05).toInt()
             val mrzWidth = (overlayBounds.width() * 0.90).toInt()
@@ -250,16 +260,14 @@ class TCMRZReader(private val context: Context) {
         } else {
             // Fallback: genel tahmini alan - debug ile optimize edelim
             Log.d(TAG, "No template detected, no overlay bounds - using estimated area")
-            Log.d(TAG, "Original estimated area would be bottom 12% of image")
             
-            // Daha küçük ve daha doğru MRZ area seçelim
-            val mrzStartY = (height * 0.90).toInt() // Alt %10'da ara (daha küçük alan)
-            val mrzHeight = (height * 0.10).toInt() // Sadece %10 yükseklik
-            val mrzStartX = (width * 0.1).toInt() // %10 margin (daha az margin)
-            val mrzWidth = (width * 0.8).toInt() // %80 genişlik
+            // Daha büyük alan kullan
+            val mrzStartY = (height * 0.85).toInt() // Alt %15'de ara
+            val mrzHeight = (height * 0.15).toInt() // %15 yükseklik
+            val mrzStartX = (width * 0.05).toInt() // %5 margin
+            val mrzWidth = (width * 0.90).toInt() // %90 genişlik
             
-            Log.d(TAG, "Adjusted MRZ area: startY=${mrzStartY}, height=${mrzHeight}, startX=${mrzStartX}, width=${mrzWidth}")
-            Log.d(TAG, "MRZ area percentage: Y=${String.format("%.1f", (mrzStartY.toFloat()/height)*100)}%-${String.format("%.1f", ((mrzStartY+mrzHeight).toFloat()/height)*100)}%")
+            Log.d(TAG, "Fallback MRZ area: startY=${mrzStartY}, height=${mrzHeight}, startX=${mrzStartX}, width=${mrzWidth}")
             
             android.graphics.Rect(mrzStartX, mrzStartY, mrzStartX + mrzWidth, mrzStartY + mrzHeight)
         }
@@ -275,44 +283,12 @@ class TCMRZReader(private val context: Context) {
         val cvMrzRect = org.opencv.core.Rect(safeLeft, safeTop, safeWidth, safeHeight)
         val mrzMat = Mat(grayMat, cvMrzRect)
         
-        // 3. Resize for optimal OCR (maintain aspect ratio) - optimal size for MRZ
-        val originalAspectRatio = mrzRect.width().toDouble() / mrzRect.height().toDouble()
-        Log.d(TAG, "Original MRZ aspect ratio: ${String.format("%.2f", originalAspectRatio)} (${mrzRect.width()}x${mrzRect.height()})")
+        // MINIMAL PREPROCESSING - MLKit works better with less processing
+        Log.d(TAG, "Using minimal preprocessing for MLKit")
         
-        val targetWidth = 1800 // Daha büyük boyut daha iyi OCR için
-        val targetHeight = (mrzRect.height() * targetWidth / mrzRect.width().toDouble()).toInt().coerceAtLeast(120)
-        val resizedMat = Mat()
-        Imgproc.resize(mrzMat, resizedMat, Size(targetWidth.toDouble(), targetHeight.toDouble()), 0.0, 0.0, Imgproc.INTER_LANCZOS4)
-        
-        Log.d(TAG, "Resized MRZ from ${mrzRect.width()}x${mrzRect.height()} to ${targetWidth}x${targetHeight}")
-        Log.d(TAG, "Resize scale factor: ${String.format("%.2f", targetWidth.toDouble()/mrzRect.width())}")
-        
-        // 4. Gentle contrast enhancement
-        val contrastMat = Mat()
-        resizedMat.convertTo(contrastMat, -1, 1.1, 5.0) // Daha yumuşak: alpha=1.1, beta=5
-        
-        Log.d(TAG, "Applied contrast enhancement")
-        
-        // 5. Very gentle noise reduction
-        val blurredMat = Mat()
-        Imgproc.GaussianBlur(contrastMat, blurredMat, Size(1.0, 1.0), 0.0) // Minimal blur
-        
-        Log.d(TAG, "Applied gentle blur")
-        
-        // Multiple preprocessing approaches - test which works better
-        val morphMat = if (true) { // Basic approach
-            Log.d(TAG, "Using basic preprocessing approach")
-            blurredMat.clone()
-        } else { // Alternative: try simple threshold
-            Log.d(TAG, "Using alternative threshold approach")
-            val binaryMat = Mat()
-            Imgproc.threshold(blurredMat, binaryMat, 127.0, 255.0, Imgproc.THRESH_BINARY)
-            binaryMat
-        }
-        
-        // 7. Convert back to Bitmap
-        val resultBitmap = Bitmap.createBitmap(morphMat.cols(), morphMat.rows(), Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(morphMat, resultBitmap)
+        // Convert back to Bitmap directly with minimal processing
+        val resultBitmap = Bitmap.createBitmap(mrzMat.cols(), mrzMat.rows(), Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(mrzMat, resultBitmap)
         
         Log.d(TAG, "MRZ preprocessing completed: ${resultBitmap.width}x${resultBitmap.height}")
         
@@ -320,16 +296,12 @@ class TCMRZReader(private val context: Context) {
         inputMat.release()
         grayMat.release()
         mrzMat.release()
-        resizedMat.release()
-        contrastMat.release()
-        blurredMat.release()
-        morphMat.release()
         
         return resultBitmap
     }
 
     private suspend fun performMLKitOCR(bitmap: Bitmap): String {
-        Log.d(TAG, "Performing MLKit OCR on preprocessed image (${bitmap.width}x${bitmap.height})")
+        Log.d(TAG, "Performing MLKit OCR on image (${bitmap.width}x${bitmap.height})")
         
         // Debug: Check if bitmap is valid
         if (bitmap.isRecycled) {
@@ -348,18 +320,33 @@ class TCMRZReader(private val context: Context) {
                         val recognizedText = visionText.text
                         
                         Log.d(TAG, "MLKit OCR completed: ${recognizedText.length} characters")
-                        Log.d(TAG, "Raw MLKit text (first 100 chars): '${recognizedText.take(100)}${if (recognizedText.length > 100) "..." else ""}'")
                         
-                        // Analyze text blocks for better MRZ detection
-                        Log.d(TAG, "Text blocks found: ${visionText.textBlocks.size}")
-                        visionText.textBlocks.forEachIndexed { index, block ->
-                            Log.d(TAG, "Block $index: '${block.text.replace("\n", " ").take(50)}...'")
+                        if (recognizedText.isNotEmpty()) {
+                            Log.d(TAG, "Raw MLKit text (first 200 chars): '${recognizedText.take(200)}${if (recognizedText.length > 200) "..." else ""}'")
+                            
+                            // Analyze text blocks for better MRZ detection
+                            Log.d(TAG, "Text blocks found: ${visionText.textBlocks.size}")
+                            visionText.textBlocks.forEachIndexed { index, block ->
+                                Log.d(TAG, "Block $index: '${block.text.replace("\n", " ").take(100)}${if (block.text.length > 100) "..." else ""}'")
+                                Log.d(TAG, "Block $index boundingBox: ${block.boundingBox}")
+                            }
+                            
+                            // Check for typical MRZ characters
+                            val mrzCharCount = recognizedText.count { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" }
+                            val mrzCharPercentage = if (recognizedText.isNotEmpty()) (mrzCharCount.toFloat() / recognizedText.length * 100).toInt() else 0
+                            Log.d(TAG, "MRZ character percentage: $mrzCharPercentage% ($mrzCharCount/${recognizedText.length})")
+                            
+                            // Check for lines that might be MRZ-like
+                            val lines = recognizedText.split("\n")
+                            Log.d(TAG, "Text lines found: ${lines.size}")
+                            lines.forEachIndexed { index, line ->
+                                if (line.length >= 20) {
+                                    Log.d(TAG, "Long line $index: '$line' (${line.length} chars)")
+                                }
+                            }
+                        } else {
+                            Log.w(TAG, "MLKit OCR returned empty text")
                         }
-                        
-                        // Check for typical MRZ characters
-                        val mrzCharCount = recognizedText.count { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" }
-                        val mrzCharPercentage = if (recognizedText.isNotEmpty()) (mrzCharCount.toFloat() / recognizedText.length * 100).toInt() else 0
-                        Log.d(TAG, "MRZ character percentage: $mrzCharPercentage% ($mrzCharCount/${recognizedText.length})")
                         
                         if (continuation.isActive) {
                             continuation.resume(recognizedText)
@@ -381,83 +368,154 @@ class TCMRZReader(private val context: Context) {
     }
 
     private fun parseMRZLines(ocrText: String): List<String> {
-        Log.d(TAG, "Parsing MRZ from OCR text: '${ocrText.take(100)}...'")
+        Log.d(TAG, "Parsing MRZ from OCR text (${ocrText.length} chars)")
+        Log.d(TAG, "Raw OCR text: '${ocrText.take(300)}${if (ocrText.length > 300) "..." else ""}'")
         
-        // Clean and normalize the OCR text
-        val cleanedText = ocrText
-            .replace(Regex("[^A-Z0-9<\\n\\r ]"), "") // Remove invalid characters
-            .replace(Regex("\\s+"), " ") // Normalize spaces
-            .trim()
+        if (ocrText.isEmpty()) {
+            Log.w(TAG, "Empty OCR text received")
+            return emptyList()
+        }
         
-        Log.d(TAG, "Cleaned OCR text: '${cleanedText.take(100)}...'")
+        // Step 1: Find potential MRZ lines in the OCR text
+        val allLines = ocrText.split(Regex("[\\r\\n]+"))
+        Log.d(TAG, "Split into ${allLines.size} raw lines")
         
-        // Split by various line separators and clean each line
-        var lines = cleanedText
-            .split(Regex("[\\n\\r]+"))
-            .map { line ->
-                line.trim()
-                    .replace(" ", "") // Remove all spaces
-                    .replace("O", "0") // Common OCR mistake: O->0
-                    .replace("I", "1") // Common OCR mistake: I->1
-                    .replace("S", "5") // Common OCR mistake: S->5
+        allLines.forEachIndexed { index, line ->
+            if (line.trim().isNotEmpty()) {
+                Log.d(TAG, "Raw line $index: '${line.trim()}' (${line.trim().length} chars)")
             }
-            .filter { it.length >= 20 } // Filter out too short lines (MRZ lines should be 30 chars)
-            .filter { it.matches(Regex("[A-Z0-9<]+")) } // Only valid MRZ characters
-            .take(3) // TC MRZ has 3 lines
+        }
+        
+        // Step 2: Look for MRZ-like patterns
+        val potentialMrzLines = mutableListOf<String>()
+        
+        for (line in allLines) {
+            val cleanLine = line.trim()
+                .replace(Regex("\\s+"), "") // Remove spaces
+                .replace("O", "0") // OCR corrections
+                .replace("l", "1") // OCR corrections
+                .replace("I", "1") // OCR corrections
+                .replace("S", "5") // OCR corrections
+                .replace("G", "6") // OCR corrections
+                .replace("B", "8") // OCR corrections
+                .toUpperCase()
             
-        // If we got one very long line, try to split it into 3 lines of 30 characters each
-        if (lines.size == 1 && lines[0].length >= 60) {
-            val longLine = lines[0]
+            // Check if line has MRZ characteristics
+            if (cleanLine.length >= 25) { // MRZ lines are typically 30 chars but allow some error
+                val mrzCharCount = cleanLine.count { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" }
+                val mrzPercentage = mrzCharCount.toFloat() / cleanLine.length
+                
+                Log.d(TAG, "Potential MRZ line: '$cleanLine' (${cleanLine.length} chars, ${(mrzPercentage * 100).toInt()}% MRZ chars)")
+                
+                if (mrzPercentage > 0.8) { // 80% of characters should be MRZ-valid
+                    potentialMrzLines.add(cleanLine)
+                    Log.d(TAG, "Added as potential MRZ line")
+                }
+            }
+        }
+        
+        Log.d(TAG, "Found ${potentialMrzLines.size} potential MRZ lines")
+        
+        // Step 3: If we have too few lines but one long line, try to split it
+        if (potentialMrzLines.size == 1 && potentialMrzLines[0].length >= 75) {
+            val longLine = potentialMrzLines[0]
             val splitLines = mutableListOf<String>()
             
-            // Split into chunks of approximately 30 characters
-            var start = 0
-            while (start < longLine.length && splitLines.size < 3) {
-                val end = minOf(start + 30, longLine.length)
-                val chunk = longLine.substring(start, end)
-                if (chunk.length >= 20) { // Only add if long enough
+            Log.d(TAG, "Attempting to split long line: '$longLine' (${longLine.length} chars)")
+            
+            // Split into 30-character chunks
+            for (i in 0 until longLine.length step 30) {
+                val end = minOf(i + 30, longLine.length)
+                val chunk = longLine.substring(i, end)
+                
+                if (chunk.length >= 25) { // Must be reasonably long
                     splitLines.add(chunk)
+                    Log.d(TAG, "Split chunk ${splitLines.size}: '$chunk' (${chunk.length} chars)")
                 }
-                start = end
+                
+                if (splitLines.size >= 3) break // TC MRZ has 3 lines
             }
             
             if (splitLines.size >= 2) {
-                lines = splitLines
-                Log.d(TAG, "Split long line into ${splitLines.size} MRZ lines")
+                potentialMrzLines.clear()
+                potentialMrzLines.addAll(splitLines)
+                Log.d(TAG, "Successfully split into ${splitLines.size} MRZ lines")
             }
         }
         
-        Log.d(TAG, "Parsed MRZ lines: ${lines.size}")
-        lines.forEachIndexed { index, line ->
-            Log.d(TAG, "Line ${index + 1}: '$line' (${line.length} chars)")
+        // Step 4: Take the best 3 lines and pad/trim to 30 characters if needed
+        val finalLines = potentialMrzLines.take(3).map { line ->
+            when {
+                line.length == 30 -> line
+                line.length < 30 -> line.padEnd(30, '<')
+                else -> line.take(30)
+            }
         }
         
-        return lines
+        Log.d(TAG, "Final MRZ lines: ${finalLines.size}")
+        finalLines.forEachIndexed { index, line ->
+            Log.d(TAG, "Final line ${index + 1}: '$line' (${line.length} chars)")
+        }
+        
+        return finalLines
     }
 
     private fun validateMRZFormat(mrzLines: List<String>): Boolean {
-        if (mrzLines.size != 3) {
-            Log.w(TAG, "Invalid MRZ line count: ${mrzLines.size}")
+        if (mrzLines.isEmpty()) {
+            Log.w(TAG, "No MRZ lines to validate")
             return false
         }
         
-        Log.d(TAG, "Validating TC MRZ format:")
+        if (mrzLines.size < 2) {
+            Log.w(TAG, "Insufficient MRZ lines: ${mrzLines.size}, need at least 2")
+            return false
+        }
+        
+        Log.d(TAG, "Validating TC MRZ format with ${mrzLines.size} lines:")
         mrzLines.forEachIndexed { index, line ->
             Log.d(TAG, "Line ${index + 1}: '$line' (length: ${line.length})")
         }
         
-        // TC MRZ format validation with OCR error tolerance
-        val line1Valid = validateLine1(mrzLines[0])
-        val line2Valid = validateLine2(mrzLines[1])
-        val line3Valid = validateLine3(mrzLines[2])
+        // Daha esnek validation - sadece temel pattern kontrolleri
+        var validLines = 0
+        var hasIdPattern = false
+        var hasNamePattern = false
+        var hasDatePattern = false
         
-        Log.d(TAG, "TC MRZ validation: Line1=$line1Valid, Line2=$line2Valid, Line3=$line3Valid")
+        mrzLines.forEachIndexed { index, line ->
+            when (index) {
+                0 -> {
+                    val line1Valid = validateLine1Flexible(line)
+                    Log.d(TAG, "Line 1 validation: $line1Valid")
+                    if (line1Valid) {
+                        validLines++
+                        hasIdPattern = true
+                    }
+                }
+                1 -> {
+                    val line2Valid = validateLine2Flexible(line)
+                    Log.d(TAG, "Line 2 validation: $line2Valid")
+                    if (line2Valid) {
+                        validLines++
+                        hasDatePattern = true
+                    }
+                }
+                2 -> {
+                    val line3Valid = validateLine3Flexible(line)
+                    Log.d(TAG, "Line 3 validation: $line3Valid")
+                    if (line3Valid) {
+                        validLines++
+                        hasNamePattern = true
+                    }
+                }
+            }
+        }
         
-        // En az 2 satır geçerli olmalı (OCR hatalarına tolerans)
-        val validCount = listOf(line1Valid, line2Valid, line3Valid).count { it }
-        val isValid = validCount >= 2
+        // En az 1 satır geçerli olmalı ve temel pattern'lar bulunmalı
+        val isValid = validLines >= 1 && (hasIdPattern || hasDatePattern || hasNamePattern)
         
-        Log.d(TAG, "Valid lines: $validCount/3, Overall valid: $isValid")
+        Log.d(TAG, "Valid lines: $validLines/${mrzLines.size}, hasId: $hasIdPattern, hasDate: $hasDatePattern, hasName: $hasNamePattern")
+        Log.d(TAG, "Overall MRZ validation result: $isValid")
         
         return isValid
     }
@@ -489,6 +547,56 @@ class TCMRZReader(private val context: Context) {
         
         // Sadece harf ve < karakteri kontrol
         return line.matches(Regex("[A-Z<]{30}"))
+    }
+
+    // Esnek validation metodları - OCR hatalarına daha toleranslı
+    private fun validateLine1Flexible(line: String): Boolean {
+        if (line.length < 25 || line.length > 35) {
+            Log.d(TAG, "Line 1 length check failed: ${line.length}")
+            return false
+        }
+        
+        // I ile başlamalı ve TUR içermeli
+        val startsWithI = line.startsWith("I") || line.startsWith("1")
+        val containsTUR = line.contains("TUR") || line.contains("TU8") || line.contains("TU6")
+        val hasNumbers = line.any { it.isDigit() }
+        
+        Log.d(TAG, "Line 1 flexible validation: startsWithI=$startsWithI, containsTUR=$containsTUR, hasNumbers=$hasNumbers")
+        
+        return startsWithI && (containsTUR || hasNumbers)
+    }
+    
+    private fun validateLine2Flexible(line: String): Boolean {
+        if (line.length < 25 || line.length > 35) {
+            Log.d(TAG, "Line 2 length check failed: ${line.length}")
+            return false
+        }
+        
+        // Başında tarih benzeri pattern (6 rakam) ve TUR içermeli
+        val startNumbers = line.take(6).count { it.isDigit() }
+        val containsTUR = line.contains("TUR") || line.contains("TU8") || line.contains("TU6") 
+        val hasGender = line.contains("M") || line.contains("F")
+        val hasNumbers = line.count { it.isDigit() } >= 12 // En az 12 rakam olmalı (tarihler)
+        
+        Log.d(TAG, "Line 2 flexible validation: startNumbers=$startNumbers, containsTUR=$containsTUR, hasGender=$hasGender, hasNumbers=$hasNumbers")
+        
+        return startNumbers >= 4 && (containsTUR || hasGender || hasNumbers)
+    }
+    
+    private fun validateLine3Flexible(line: String): Boolean {
+        if (line.length < 25 || line.length > 35) {
+            Log.d(TAG, "Line 3 length check failed: ${line.length}")
+            return false
+        }
+        
+        // Çoğunlukla harf olmalı ve << pattern'ı içerebilir
+        val letterCount = line.count { it.isLetter() }
+        val hasDoubleAngle = line.contains("<<") || line.contains("<") || line.contains(">>")
+        val letterPercentage = letterCount.toFloat() / line.length
+        
+        Log.d(TAG, "Line 3 flexible validation: letterCount=$letterCount, hasDoubleAngle=$hasDoubleAngle, letterPercentage=${(letterPercentage * 100).toInt()}%")
+        
+        return letterPercentage > 0.6 // En az %60 harf
     }
 
     private fun extractPersonalInfo(mrzLines: List<String>): PersonalData? {
