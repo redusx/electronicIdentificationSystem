@@ -114,9 +114,6 @@ fun MRZResultScreen(
                 PersonalInfoCard(personalData = mrzResult.data)
             }
             
-            // Teknik Detaylar Kartı
-            TechnicalDetailsCard(mrzResult = mrzResult)
-            
             // Ham MRZ Verileri Kartı
             RawMRZDataCard(mrzResult = mrzResult)
         }
@@ -148,13 +145,18 @@ private fun ResultStatusCard(mrzResult: TCMRZReader.TCMRZResult) {
                 )
                 Column {
                     Text(
-                        text = if (mrzResult.success) "✅ MRZ Başarıyla Okundu" else "❌ MRZ Okunamadı",
+                        text = if (mrzResult.success) "MRZ Başarıyla Okundu" else "MRZ Okunamadı",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (mrzResult.success) Color(0xFF2E7D32) else Color(0xFFD32F2F)
                     )
                     Text(
                         text = "Güven Oranı: ${String.format("%.1f", mrzResult.confidence)}%",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                    Text(
+                        text = "İşlem Süresi: ${mrzResult.processingTime}ms",
                         fontSize = 14.sp,
                         color = Color.Gray
                     )
@@ -233,7 +235,7 @@ private fun PersonalInfoCard(personalData: TCMRZReader.PersonalData) {
             
             PersonalInfoItem(
                 icon = Icons.Default.DateRange,
-                label = "Geçerlilik",
+                label = "Son Geçerlilik",
                 value = personalData.expiryDate
             )
             
@@ -283,54 +285,6 @@ private fun PersonalInfoItem(
     }
 }
 
-@Composable
-private fun TechnicalDetailsCard(mrzResult: TCMRZReader.TCMRZResult) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF5F5F5)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                text = "⚙️ Teknik Detaylar",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            
-            Divider(color = Color.Gray.copy(alpha = 0.3f))
-            
-            TechnicalInfoItem("İşlem Süresi", "${mrzResult.processingTime}ms")
-            TechnicalInfoItem("Güven Oranı", "${String.format("%.2f", mrzResult.confidence)}%")
-            TechnicalInfoItem("MRZ Satır Sayısı", "${mrzResult.rawMrz.size}")
-            TechnicalInfoItem("Okuma Durumu", if (mrzResult.success) "Başarılı" else "Başarısız")
-        }
-    }
-}
-
-@Composable
-private fun TechnicalInfoItem(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            fontSize = 14.sp,
-            color = Color.Gray
-        )
-        Text(
-            text = value,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
 
 @Composable
 private fun RawMRZDataCard(mrzResult: TCMRZReader.TCMRZResult) {

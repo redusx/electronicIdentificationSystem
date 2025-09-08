@@ -104,6 +104,16 @@ fun NFCResultScreen(
                 
                 // Document Information Card
                 DocumentInformationCard(nfcResult = nfcResult)
+                
+                // Additional Personal Details Card (DG11)
+                if (nfcResult.additionalPersonalDetails.isNotEmpty()) {
+                    AdditionalPersonalDetailsCard(nfcResult = nfcResult)
+                }
+                
+                // Additional Document Details Card (DG12)
+                if (nfcResult.additionalDocumentDetails.isNotEmpty()) {
+                    AdditionalDocumentDetailsCard(nfcResult = nfcResult)
+                }
             } else {
                 // Error Information Card
                 ErrorInformationCard(nfcResult = nfcResult)
@@ -126,28 +136,22 @@ private fun NFCStatusCard(nfcResult: NFCReadResult) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(
-                imageVector = if (nfcResult.success) Icons.Default.CheckCircle else Icons.Default.Error,
-                contentDescription = null,
-                tint = if (nfcResult.success) Color(0xFF4CAF50) else Color(0xFFF44336),
-                modifier = Modifier.size(48.dp)
-            )
-            
-            Text(
-                text = if (nfcResult.success) "✅ NFC Okuma Başarılı!" else "❌ NFC Okuma Başarısız",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (nfcResult.success) Color(0xFF2E7D32) else Color(0xFFD32F2F),
-                textAlign = TextAlign.Center
-            )
-            
-            Text(
-                text = if (nfcResult.success) "Kimlik kartınızdaki tüm bilgiler başarıyla okundu." 
-                       else "Kimlik kartı okunamadı. Lütfen tekrar deneyin.",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
+            Row {
+                Icon(
+                    imageVector = if (nfcResult.success) Icons.Default.CheckCircle else Icons.Default.Error,
+                    contentDescription = null,
+                    tint = if (nfcResult.success) Color(0xFF4CAF50) else Color(0xFFF44336),
+                    modifier = Modifier.size(30.dp)
+                )
+                Text(
+                    text = if (nfcResult.success) "NFC Okuma Başarılı!" else "NFC Okuma Başarısız.Lütfen tekrar deneyin.",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (nfcResult.success) Color(0xFF2E7D32) else Color(0xFFD32F2F),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(start = 7.dp, top = 4.dp)
+                )
+            }
         }
     }
 }
@@ -164,7 +168,7 @@ private fun PhotoCard(photo: android.graphics.Bitmap) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "📷 Kimlik Fotoğrafı",
+                text = "Kimlik Fotoğrafı",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
@@ -174,7 +178,7 @@ private fun PhotoCard(photo: android.graphics.Bitmap) {
             
             Box(
                 modifier = Modifier
-                    .size(160.dp)
+                    .size(200.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
@@ -184,17 +188,11 @@ private fun PhotoCard(photo: android.graphics.Bitmap) {
                     contentDescription = "Kimlik Fotoğrafı",
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Crop
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Fit
                 )
             }
-            
-            Text(
-                text = "Kimlik kartından okunan orijinal fotoğraf",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
         }
     }
 }
@@ -387,5 +385,287 @@ private fun NFCInfoItem(
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
+    }
+}
+
+@Composable
+private fun AdditionalPersonalDetailsCard(nfcResult: NFCReadResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "👤➕ Ek Kişisel Detaylar (DG11)",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            
+            if (nfcResult.fullName.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Person,
+                    label = "Tam Ad",
+                    value = nfcResult.fullName
+                )
+            }
+            
+            if (nfcResult.placeOfBirth.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.LocationOn,
+                    label = "Doğum Yeri",
+                    value = nfcResult.placeOfBirth
+                )
+            }
+            
+            if (nfcResult.address.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Home,
+                    label = "Adres",
+                    value = nfcResult.address
+                )
+            }
+            
+            if (nfcResult.profession.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Work,
+                    label = "Meslek",
+                    value = nfcResult.profession
+                )
+            }
+            
+            if (nfcResult.title.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Star,
+                    label = "Unvan",
+                    value = nfcResult.title
+                )
+            }
+            
+            if (nfcResult.phoneNumber.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Phone,
+                    label = "Telefon",
+                    value = nfcResult.phoneNumber
+                )
+            }
+            
+            // Doğum ve geçerlilik tarihleri
+            if (nfcResult.dateOfBirth.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Cake,
+                    label = "Doğum Tarihi",
+                    value = formatBirthDateForDisplay(nfcResult.dateOfBirth)
+                )
+            }
+            
+            if (nfcResult.dateOfExpiry.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Event,
+                    label = "Son Kullanım Tarihi",
+                    value = formatExpiryDateForDisplay(nfcResult.dateOfExpiry)
+                )
+            }
+            
+            // E-imza bilgileri
+            if (nfcResult.digitalSignature.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Security,
+                    label = "Dijital İmza",
+                    value = nfcResult.digitalSignature
+                )
+            }
+            
+            if (nfcResult.signatureAlgorithm.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.VpnKey,
+                    label = "İmza Algoritması",
+                    value = nfcResult.signatureAlgorithm
+                )
+            }
+            
+            if (nfcResult.certificateIssuer.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.VerifiedUser,
+                    label = "Sertifika Türü",
+                    value = nfcResult.certificateIssuer
+                )
+            }
+            
+            // Show additional details if any
+            val additionalDetails = nfcResult.additionalPersonalDetails
+                .filterNot { (key, _) -> 
+                    key in listOf("nameOfHolder", "placeOfBirth_0", "address_0", "profession", "title", "telephone")
+                }
+            
+            if (additionalDetails.isNotEmpty()) {
+                Text(
+                    text = "Diğer Bilgiler:",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                
+                additionalDetails.forEach { (key, value) ->
+                    if (value.isNotEmpty()) {
+                        NFCInfoItem(
+                            icon = Icons.Default.Info,
+                            label = key.replace("_", " ").replaceFirstChar { it.uppercase() },
+                            value = value
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdditionalDocumentDetailsCard(nfcResult: NFCReadResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "📄➕ Ek Belge Detayları (DG12)",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            
+            if (nfcResult.issuingAuthority.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.AccountBalance,
+                    label = "Veren Makam",
+                    value = nfcResult.issuingAuthority
+                )
+            }
+            
+            if (nfcResult.dateOfIssue.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.CalendarToday,
+                    label = "Veriliş Tarihi",
+                    value = nfcResult.dateOfIssue
+                )
+            }
+            
+            if (nfcResult.endorsements.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Note,
+                    label = "Notlar ve Gözlemler",
+                    value = nfcResult.endorsements
+                )
+            }
+            
+            if (nfcResult.taxOrExitRequirements.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Security,
+                    label = "Vergi/Çıkış Gereksinimleri",
+                    value = nfcResult.taxOrExitRequirements
+                )
+            }
+            
+            // Show additional details if any
+            val additionalDetails = nfcResult.additionalDocumentDetails
+                .filterNot { (key, _) -> 
+                    key in listOf("issuingAuthority", "dateOfIssue", "endorsements", "taxExitRequirements")
+                }
+            
+            if (additionalDetails.isNotEmpty()) {
+                Text(
+                    text = "Diğer Belge Bilgileri:",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                
+                additionalDetails.forEach { (key, value) ->
+                    if (value.isNotEmpty()) {
+                        NFCInfoItem(
+                            icon = Icons.Default.Description,
+                            label = key.replace("_", " ").replaceFirstChar { it.uppercase() },
+                            value = value
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Helper function to format birth dates for display
+private fun formatBirthDateForDisplay(dateString: String): String {
+    return try {
+        // If it's in YYMMDD format, convert to readable format
+        if (dateString.length == 6 && dateString.all { it.isDigit() }) {
+            val yy = dateString.substring(0, 2).toInt()
+            val month = dateString.substring(2, 4)
+            val day = dateString.substring(4, 6)
+            
+            // Birth date logic: Current year 2025
+            // If YY > 25, it's 19YY (1926-1999)
+            // If YY <= 25, it's 20YY (2000-2025)
+            val fullYear = if (yy > 25) {
+                1900 + yy  // 1926-1999
+            } else {
+                2000 + yy  // 2000-2025
+            }
+            
+            "$day/$month/$fullYear"
+        } else if (dateString.length == 8 && dateString.all { it.isDigit() }) {
+            // YYYYMMDD format
+            val year = dateString.substring(0, 4)
+            val month = dateString.substring(4, 6)
+            val day = dateString.substring(6, 8)
+            "$day/$month/$year"
+        } else {
+            // Already in readable format or unknown format
+            dateString
+        }
+    } catch (e: Exception) {
+        dateString // Return original if formatting fails
+    }
+}
+
+// Helper function to format expiry dates for display
+private fun formatExpiryDateForDisplay(dateString: String): String {
+    return try {
+        // If it's in YYMMDD format, convert to readable format
+        if (dateString.length == 6 && dateString.all { it.isDigit() }) {
+            val yy = dateString.substring(0, 2).toInt()
+            val month = dateString.substring(2, 4)
+            val day = dateString.substring(4, 6)
+            
+            // Expiry date logic: Always in the future (2025+)
+            // All YY values should be interpreted as 20YY for expiry dates
+            // Exception: if YY is very small (00-99), still use 20YY
+            val fullYear = 2000 + yy  // 2000-2099
+            
+            "$day/$month/$fullYear"
+        } else if (dateString.length == 8 && dateString.all { it.isDigit() }) {
+            // YYYYMMDD format
+            val year = dateString.substring(0, 4)
+            val month = dateString.substring(4, 6)
+            val day = dateString.substring(6, 8)
+            "$day/$month/$year"
+        } else {
+            // Already in readable format or unknown format
+            dateString
+        }
+    } catch (e: Exception) {
+        dateString // Return original if formatting fails
     }
 }

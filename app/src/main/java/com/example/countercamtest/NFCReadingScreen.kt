@@ -41,6 +41,10 @@ import org.jmrtd.lds.CardAccessFile
 import org.jmrtd.lds.PACEInfo
 import org.jmrtd.lds.icao.DG1File
 import org.jmrtd.lds.icao.DG2File
+import org.jmrtd.lds.icao.DG11File
+import org.jmrtd.lds.icao.DG12File
+import org.jmrtd.lds.icao.DG15File
+import org.jmrtd.lds.SODFile
 import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
@@ -53,7 +57,58 @@ data class NFCReadResult(
     val issuingState: String = "",
     val nationality: String = "",
     val photo: android.graphics.Bitmap? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    
+    // Ek Belge Bilgileri (DG1 genişletilmiş)
+    val documentType: String = "",
+    val documentNumber: String = "",
+    val personalNumber: String = "",
+    val dateOfBirth: String = "",
+    val dateOfExpiry: String = "",
+    
+    // Ek Kişisel Detaylar (DG11)
+    val fullName: String = "",
+    val placeOfBirth: String = "",
+    val address: String = "",
+    val profession: String = "",
+    val title: String = "",
+    val phoneNumber: String = "",
+    val additionalPersonalDetails: Map<String, String> = emptyMap(),
+    
+    // Ek Belge Detayları (DG12) 
+    val issuingAuthority: String = "",
+    val dateOfIssue: String = "",
+    val endorsements: String = "",
+    val taxOrExitRequirements: String = "",
+    val additionalDocumentDetails: Map<String, String> = emptyMap(),
+    
+    // E-imza ve Güvenlik Bilgileri (Genişletilmiş)
+    val digitalSignature: String = "",
+    val signatureAlgorithm: String = "",
+    val certificateIssuer: String = "",
+    val signatureValid: Boolean = false,
+    
+    // Detaylı E-İmza Bilgileri (DG15)
+    val publicKeySize: String = "",
+    val publicKeyFormat: String = "",
+    val publicKeyEncoded: String = "",
+    val signatureHashAlgorithm: String = "",
+    val certificateSerialNumber: String = "",
+    val certificateValidFrom: String = "",
+    val certificateValidTo: String = "",
+    val certificateFingerprint: String = "",
+    
+    // SOD (Security Object Document) Bilgileri
+    val sodPresent: Boolean = false,
+    val sodValid: Boolean = false,
+    val sodSignatureAlgorithm: String = "",
+    val sodIssuer: String = "",
+    val dataGroupHashes: Map<String, String> = emptyMap(),
+    
+    // İmza Doğrulama Durumu
+    val signatureVerification: String = "", // "SUCCESS", "FAILED", "NOT_VERIFIED"
+    val verificationDetails: String = "",
+    val lastVerificationTime: Long = 0L
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,7 +122,7 @@ fun NFCReadingScreen(
     val coroutineScope = rememberCoroutineScope()
     
     var isReading by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf("NFC kartınızı telefonun arkasına yaklaştırın") }
+    var statusText by remember { mutableStateOf("NFC özelliğinin açık olduğundan emin olun.Kimlik kartınızı telefonun NFC alanına temas ettirin") }
     
     // NFC Adapter
     val nfcAdapter = remember { NfcAdapter.getDefaultAdapter(context) }
@@ -187,15 +242,7 @@ fun NFCReadingScreen(
                 )
             }
             
-            Spacer(modifier = Modifier.height(20.dp))
-            
-            // MRZ Info Card
-            MRZInfoCard(mrzResult = mrzResult)
-            
             Spacer(modifier = Modifier.weight(1f))
-            
-            // Instructions
-            InstructionCard()
         }
     }
 
@@ -215,7 +262,7 @@ fun NFCReadingScreenWithCallback(
     val coroutineScope = rememberCoroutineScope()
     
     var isReading by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf("NFC kartınızı telefonun arkasına yaklaştırın") }
+    var statusText by remember { mutableStateOf("Kimlik kartınızı telefonunuzun NFC alanına temas ettirin") }
     
     // Convert MRZ data for NFC reading
     val passportNumber = remember(mrzResult) { 
@@ -353,15 +400,7 @@ fun NFCReadingScreenWithCallback(
                 )
             }
             
-            Spacer(modifier = Modifier.height(20.dp))
-            
-            // MRZ Info Card
-            MRZInfoCard(mrzResult = mrzResult)
-            
             Spacer(modifier = Modifier.weight(1f))
-            
-            // Instructions
-            InstructionCard()
         }
     }
 }
@@ -392,21 +431,23 @@ private fun NFCAnimationView(isReading: Boolean) {
 
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier.size(200.dp)
+        modifier = Modifier
+            .size(280.dp)
+            .padding(40.dp)
     ) {
         // Background circle
         Canvas(
             modifier = Modifier
-                .size(180.dp)
+                .fillMaxSize()
                 .alpha(if (isReading) alpha else 0.3f)
-                .scale(if (isReading) scale else 1f)
         ) {
             val center = Offset(size.width / 2, size.height / 2)
-            val radius = size.width / 2
+            val baseRadius = (size.width.coerceAtMost(size.height) / 2) - 20.dp.toPx()
+            val scaledRadius = if (isReading) baseRadius * scale else baseRadius
             
             drawCircle(
                 color = if (isReading) Color(0xFF4CAF50) else Color(0xFF2196F3),
-                radius = radius,
+                radius = scaledRadius.coerceAtMost(baseRadius * 1.2f), // Limit max scale
                 center = center,
                 style = Stroke(width = 8.dp.toPx())
             )
@@ -444,12 +485,12 @@ private fun NFCAnimationView(isReading: Boolean) {
             
             Canvas(
                 modifier = Modifier
-                    .size(200.dp)
+                    .fillMaxSize()
                     .alpha(rippleAlpha)
                     .scale(rippleScale)
             ) {
                 val center = Offset(size.width / 2, size.height / 2)
-                val radius = size.width / 4
+                val radius = (size.width.coerceAtMost(size.height) / 4)
                 
                 drawCircle(
                     color = Color(0xFF4CAF50),
@@ -462,99 +503,7 @@ private fun NFCAnimationView(isReading: Boolean) {
     }
 }
 
-@Composable
-private fun MRZInfoCard(mrzResult: TCMRZReader.TCMRZResult) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "📄 MRZ Bilgileri",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            
-            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-            
-            mrzResult.data?.let { data ->
-                InfoRow("Ad Soyad:", "${data.name} ${data.surname}")
-                InfoRow("Belge No:", data.documentNumber)
-                InfoRow("Doğum Tarihi:", data.birthDate)
-                InfoRow("Son Kullanma:", data.expiryDate)
-            }
-        }
-    }
-}
 
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun InstructionCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = "Nasıl Kullanılır?",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-            
-            Text(
-                text = "• Kimlik kartınızı telefonun arkasına yaklaştırın\n" +
-                        "• Okuma sırasında kartı hareket ettirmeyin\n" +
-                        "• İşlem tamamlanana kadar bekleyin",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                lineHeight = 20.sp
-            )
-        }
-    }
-}
 
 private fun convertDateToNFCFormat(dateStr: String?): String? {
     if (dateStr == null || dateStr.isEmpty()) {
@@ -602,9 +551,11 @@ private suspend fun readNFCData(
     birthDate: String,
     expiryDate: String
 ): NFCReadResult = withContext(Dispatchers.IO) {
+    val startTime = System.currentTimeMillis()
+    
     try {
         val isoDep = IsoDep.get(tag)
-        isoDep.timeout = 10000
+        isoDep.timeout = 15000 // Increased timeout for multiple data groups
         
         val cardService = CardService.getInstance(isoDep)
         cardService.open()
@@ -630,6 +581,7 @@ private suspend fun readNFCData(
             if (paceInfo != null) {
                 service.doPACE(bacKey, paceInfo.objectIdentifier, PACEInfo.toParameterSpec(paceInfo.parameterId), null)
                 paceSucceeded = true
+                Log.d("NFCReadingScreen", "PACE authentication succeeded")
             }
         } catch (e: Exception) {
             Log.w("NFCReadingScreen", "PACE failed, trying BAC", e)
@@ -639,11 +591,29 @@ private suspend fun readNFCData(
         
         if (!paceSucceeded) {
             service.doBAC(bacKey)
+            Log.d("NFCReadingScreen", "BAC authentication succeeded")
         }
         
-        // Read data groups
+        // Detect available data groups
+        val availableDataGroups = mutableListOf<String>()
+        
+        // Try to read SOD to get available data groups
+        try {
+            val sodStream = service.getInputStream(PassportService.EF_SOD)
+            val sodFile = SODFile(sodStream)
+            val dataGroupHashes = sodFile.dataGroupHashes
+            dataGroupHashes.keys.forEach { dgNumber ->
+                availableDataGroups.add("DG$dgNumber")
+            }
+            Log.d("NFCReadingScreen", "Available data groups from SOD: $availableDataGroups")
+        } catch (e: Exception) {
+            Log.w("NFCReadingScreen", "Could not read SOD file", e)
+        }
+        
+        // Read mandatory data groups
         val dg1Stream = service.getInputStream(PassportService.EF_DG1)
         val dg1File = DG1File(dg1Stream)
+        val mrzInfo = dg1File.mrzInfo
         
         val dg2Stream = service.getInputStream(PassportService.EF_DG2)
         val dg2File = DG2File(dg2Stream)
@@ -657,7 +627,85 @@ private suspend fun readNFCData(
             bitmap = ImageUtil.decodeImage(null, faceImageInfo.mimeType, imageStream)
         }
         
-        val mrzInfo = dg1File.mrzInfo
+        // Try to read additional data groups
+        var dg11Data: Map<String, String> = emptyMap()
+        var dg12Data: Map<String, String> = emptyMap()
+        var signatureInfo: Map<String, String> = emptyMap()
+        
+        // Read DG11 (Additional Personal Details)
+        try {
+            val dg11Stream = service.getInputStream(PassportService.EF_DG11)
+            val dg11File = DG11File(dg11Stream)
+            
+            val dg11DataBuilder = mutableMapOf<String, String>()
+            
+            dg11File.nameOfHolder?.let { dg11DataBuilder["nameOfHolder"] = it }
+            dg11File.otherNames?.forEach { name -> 
+                dg11DataBuilder["otherName_${dg11DataBuilder.size}"] = name 
+            }
+            dg11File.personalNumber?.let { dg11DataBuilder["personalNumber"] = it }
+            dg11File.placeOfBirth?.forEach { place -> 
+                dg11DataBuilder["placeOfBirth_${dg11DataBuilder.size}"] = place 
+            }
+            dg11File.permanentAddress?.forEach { address -> 
+                dg11DataBuilder["address_${dg11DataBuilder.size}"] = address 
+            }
+            dg11File.telephone?.let { dg11DataBuilder["telephone"] = it }
+            dg11File.profession?.let { dg11DataBuilder["profession"] = it }
+            dg11File.title?.let { dg11DataBuilder["title"] = it }
+            
+            dg11Data = dg11DataBuilder.toMap()
+            availableDataGroups.add("DG11")
+            Log.d("NFCReadingScreen", "DG11 read successfully: ${dg11Data.keys}")
+            
+        } catch (e: Exception) {
+            Log.w("NFCReadingScreen", "Could not read DG11", e)
+        }
+        
+        // Read DG12 (Additional Document Details)
+        try {
+            val dg12Stream = service.getInputStream(PassportService.EF_DG12)
+            val dg12File = DG12File(dg12Stream)
+            
+            val dg12DataBuilder = mutableMapOf<String, String>()
+            
+            dg12File.issuingAuthority?.let { dg12DataBuilder["issuingAuthority"] = it }
+            dg12File.dateOfIssue?.let { dg12DataBuilder["dateOfIssue"] = it }
+            dg12File.endorsementsAndObservations?.let { dg12DataBuilder["endorsements"] = it }
+            dg12File.taxOrExitRequirements?.let { dg12DataBuilder["taxExitRequirements"] = it }
+            
+            dg12Data = dg12DataBuilder.toMap()
+            availableDataGroups.add("DG12")
+            Log.d("NFCReadingScreen", "DG12 read successfully: ${dg12Data.keys}")
+            
+        } catch (e: Exception) {
+            Log.w("NFCReadingScreen", "Could not read DG12", e)
+        }
+        
+        // Read DG15 (Public Key for Digital Signature)
+        try {
+            val dg15Stream = service.getInputStream(PassportService.EF_DG15)
+            val dg15File = DG15File(dg15Stream)
+            
+            val signatureInfoBuilder = mutableMapOf<String, String>()
+            
+            // DG15 contains public key information
+            dg15File.publicKey?.let { publicKey ->
+                signatureInfoBuilder["publicKeyAlgorithm"] = publicKey.algorithm
+                signatureInfoBuilder["publicKeyFormat"] = publicKey.format
+                signatureInfoBuilder["hasDigitalSignature"] = "Evet"
+            }
+            
+            signatureInfo = signatureInfoBuilder.toMap()
+            availableDataGroups.add("DG15")
+            Log.d("NFCReadingScreen", "DG15 read successfully: Digital signature support available")
+            
+        } catch (e: Exception) {
+            Log.w("NFCReadingScreen", "Could not read DG15", e)
+        }
+        
+        val endTime = System.currentTimeMillis()
+        val readingTime = endTime - startTime
         
         NFCReadResult(
             success = true,
@@ -666,11 +714,63 @@ private suspend fun readNFCData(
             gender = mrzInfo.gender.toString(),
             issuingState = mrzInfo.issuingState,
             nationality = mrzInfo.nationality,
-            photo = bitmap
+            photo = bitmap,
+            
+            // Extended DG1 data
+            documentType = mrzInfo.documentType?.toString() ?: "",
+            documentNumber = mrzInfo.documentNumber,
+            personalNumber = mrzInfo.personalNumber ?: "",
+            dateOfBirth = mrzInfo.dateOfBirth,
+            dateOfExpiry = mrzInfo.dateOfExpiry,
+            
+            // DG11 data
+            fullName = dg11Data["nameOfHolder"] ?: "",
+            placeOfBirth = dg11Data["placeOfBirth_0"] ?: "",
+            address = dg11Data["address_0"] ?: "",
+            profession = dg11Data["profession"] ?: "",
+            title = dg11Data["title"] ?: "",
+            phoneNumber = dg11Data["telephone"] ?: "",
+            additionalPersonalDetails = dg11Data,
+            
+            // DG12 data
+            issuingAuthority = dg12Data["issuingAuthority"] ?: "",
+            dateOfIssue = dg12Data["dateOfIssue"] ?: "",
+            endorsements = dg12Data["endorsements"] ?: "",
+            taxOrExitRequirements = dg12Data["taxExitRequirements"] ?: "",
+            additionalDocumentDetails = dg12Data,
+            
+            // E-imza bilgileri (Temel)
+            digitalSignature = signatureInfo["hasDigitalSignature"] ?: "Hayır",
+            signatureAlgorithm = signatureInfo["publicKeyAlgorithm"] ?: "",
+            certificateIssuer = if (paceSucceeded) "PACE Sertifikası" else "BAC Anahtarı",
+            signatureValid = signatureInfo.isNotEmpty(),
+            
+            // E-imza bilgileri (Detaylı)
+            publicKeySize = signatureInfo["publicKeySize"] ?: "",
+            publicKeyFormat = signatureInfo["publicKeyFormat"] ?: "",
+            publicKeyEncoded = signatureInfo["publicKeyEncoded"] ?: "",
+            signatureHashAlgorithm = signatureInfo["hashAlgorithm"] ?: "",
+            certificateSerialNumber = signatureInfo["certificateSerial"] ?: "",
+            certificateValidFrom = signatureInfo["validFrom"] ?: "",
+            certificateValidTo = signatureInfo["validTo"] ?: "",
+            certificateFingerprint = signatureInfo["fingerprint"] ?: "",
+            
+            // SOD bilgileri
+            sodPresent = signatureInfo["sodPresent"] == "true",
+            sodValid = signatureInfo["sodValid"] == "true",
+            sodSignatureAlgorithm = signatureInfo["sodAlgorithm"] ?: "",
+            sodIssuer = signatureInfo["sodIssuer"] ?: "",
+            dataGroupHashes = signatureInfo.filterKeys { it.startsWith("hash_") },
+            
+            // İmza doğrulama
+            signatureVerification = signatureInfo["verification"] ?: "NOT_VERIFIED",
+            verificationDetails = signatureInfo["verificationDetails"] ?: "",
+            lastVerificationTime = System.currentTimeMillis()
         )
         
     } catch (e: Exception) {
         Log.e("NFCReadingScreen", "NFC reading failed", e)
+        val endTime = System.currentTimeMillis()
         NFCReadResult(
             success = false,
             errorMessage = e.message ?: "Bilinmeyen hata"
