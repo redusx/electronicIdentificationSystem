@@ -39,6 +39,7 @@ import org.opencv.core.Size
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import android.content.Intent
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -59,6 +60,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppNavigation() {
+    val context = LocalContext.current
     val navController = rememberNavController()
     var currentMRZResult by remember { mutableStateOf<TCMRZReader.TCMRZResult?>(null) }
     
@@ -86,6 +88,13 @@ private fun AppNavigation() {
                         navController.navigate("camera") {
                             popUpTo("mrz_result") { inclusive = true }
                         }
+                    },
+                    onNavigateToNFC = {
+                        // Start NFC Activity with MRZ data
+                        val intent = Intent(context, NFCActivity::class.java).apply {
+                            putExtra(NFCActivity.EXTRA_MRZ_RESULT, mrzResult)
+                        }
+                        context.startActivity(intent)
                     }
                 )
             } ?: run {

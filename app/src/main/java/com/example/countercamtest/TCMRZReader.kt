@@ -13,6 +13,7 @@ import org.opencv.imgproc.Imgproc
 import org.json.JSONObject
 import java.util.regex.Pattern
 import kotlin.coroutines.resume
+import java.io.Serializable
 
 /**
  * TC Kimlik Kartı MRZ OCR Entegrasyonu
@@ -54,7 +55,7 @@ class TCMRZReader(private val context: Context) {
         val data: PersonalData?,
         val rawMrz: List<String>,
         val errorMessage: String? = null
-    ) {
+    ) : Serializable {
         fun toJson(): String {
             val json = JSONObject()
             json.put("success", success)
@@ -93,7 +94,7 @@ class TCMRZReader(private val context: Context) {
         val gender: String,
         val expiryDate: String,
         val nationality: String = "TUR"
-    )
+    ) : Serializable
 
     init {
         Log.i(TAG, "TC MRZ Reader initialized with MLKit")
