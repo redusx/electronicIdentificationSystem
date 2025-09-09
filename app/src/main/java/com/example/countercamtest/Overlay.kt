@@ -64,9 +64,6 @@ fun ScannerScreen(
 
             CardOverlayContainer(
                 scanOffset = scanOffset,
-                segments = segments,
-                srcWidth = srcWidth,
-                srcHeight = srcHeight,
                 isCardDetected = isCardDetected
             )
 
@@ -87,15 +84,10 @@ fun ScannerScreen(
 @Composable
 private fun CardOverlayContainer(
     scanOffset: Float,
-    segments: FloatArray? = null,
-    srcWidth: Int = 0,
-    srcHeight: Int = 0,
     isCardDetected: Boolean = false
 ) {
-    val config = LocalConfiguration.current
-    val density = LocalDensity.current
-    val screenWidth = with(density) { config.screenWidthDp.dp.toPx() }
-    val screenHeight = with(density) { config.screenHeightDp.dp.toPx() }
+
+
 
     var cardOffset by remember { mutableStateOf(Offset.Zero) }
 
@@ -108,12 +100,6 @@ private fun CardOverlayContainer(
     ) {
         CardCanvas(
             scanOffset = scanOffset,
-            segments = segments,
-            srcWidth = srcWidth,
-            srcHeight = srcHeight,
-            screenWidth = screenWidth,
-            screenHeight = screenHeight,
-            cardOffset = cardOffset,
             isCardDetected = isCardDetected,
             modifier = Modifier.onGloballyPositioned { coords ->
                 cardOffset = coords.positionInRoot()
@@ -141,12 +127,6 @@ private fun CardOverlayContainer(
 @Composable
 fun CardCanvas(
     scanOffset: Float,
-    segments: FloatArray? = null,
-    srcWidth: Int = 0,
-    srcHeight: Int = 0,
-    screenWidth: Float,
-    screenHeight: Float,
-    cardOffset: Offset,
     isCardDetected: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -175,24 +155,6 @@ fun CardCanvas(
     }
 }
 
-@Composable
-fun BottomControls(
-    flashEnabled: Boolean,
-    onFlashToggle: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp, top = 16.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(
-            onClick = onFlashToggle,
-            modifier = Modifier.size(64.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
-        ) {
-            Icon(imageVector = Icons.Default.FlashOn, contentDescription = "Flash", tint = if (flashEnabled) Color.Yellow else Color.White)
-        }
-    }
-}
 
 fun DrawScope.drawScanningAnimation(cardWidth: Float, cardHeight: Float, scanOffset: Float) {
     val gradientHeight = cardHeight * 0.4f

@@ -272,7 +272,7 @@ class UnifiedMatchingAnalyzer(
         successfulAnalyses = 0
         averageProcessingTime = 0L
         currentInterval = ANALYSIS_INTERVAL_MS
-        lastSuccessTime = System.currentTimeMillis()
+        lastSuccessTime = 0L // Reset success pause instead of setting current time
         Log.i(TAG, "Performance stats reset")
     }
 
@@ -300,6 +300,7 @@ class UnifiedMatchingAnalyzer(
         isAnalysisEnabled = true
         hasFoundValidMRZ = false
         successfulMRZResult = null
+        lastSuccessTime = 0L // Reset success pause
         Log.d(TAG, "Analysis enabled - reset to initial state")
     }
     

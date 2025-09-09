@@ -1,6 +1,7 @@
 package com.example.countercamtest
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -17,6 +18,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -99,6 +102,7 @@ fun NFCResultScreen(
                     PhotoCard(photo = photo)
                 }
                 
+                
                 // Personal Information Card
                 PersonalInformationCard(nfcResult = nfcResult)
                 
@@ -113,6 +117,11 @@ fun NFCResultScreen(
                 // Additional Document Details Card (DG12)
                 if (nfcResult.additionalDocumentDetails.isNotEmpty()) {
                     AdditionalDocumentDetailsCard(nfcResult = nfcResult)
+                }
+                
+                // Digital Signature Card (DG15 + SOD)
+                if (nfcResult.digitalSignature.isNotEmpty() || nfcResult.sodPresent) {
+                    DigitalSignatureCard(nfcResult = nfcResult)
                 }
             } else {
                 // Error Information Card
@@ -155,6 +164,7 @@ private fun NFCStatusCard(nfcResult: NFCReadResult) {
         }
     }
 }
+
 
 @Composable
 private fun PhotoCard(photo: android.graphics.Bitmap) {
@@ -467,33 +477,8 @@ private fun AdditionalPersonalDetailsCard(nfcResult: NFCReadResult) {
             if (nfcResult.dateOfExpiry.isNotEmpty()) {
                 NFCInfoItem(
                     icon = Icons.Default.Event,
-                    label = "Son Kullanım Tarihi",
+                    label = "Son Geçerlilik",
                     value = formatExpiryDateForDisplay(nfcResult.dateOfExpiry)
-                )
-            }
-            
-            // E-imza bilgileri
-            if (nfcResult.digitalSignature.isNotEmpty()) {
-                NFCInfoItem(
-                    icon = Icons.Default.Security,
-                    label = "Dijital İmza",
-                    value = nfcResult.digitalSignature
-                )
-            }
-            
-            if (nfcResult.signatureAlgorithm.isNotEmpty()) {
-                NFCInfoItem(
-                    icon = Icons.Default.VpnKey,
-                    label = "İmza Algoritması",
-                    value = nfcResult.signatureAlgorithm
-                )
-            }
-            
-            if (nfcResult.certificateIssuer.isNotEmpty()) {
-                NFCInfoItem(
-                    icon = Icons.Default.VerifiedUser,
-                    label = "Sertifika Türü",
-                    value = nfcResult.certificateIssuer
                 )
             }
             
@@ -606,6 +591,223 @@ private fun AdditionalDocumentDetailsCard(nfcResult: NFCReadResult) {
     }
 }
 
+@Composable
+private fun DigitalSignatureCard(nfcResult: NFCReadResult) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header with status
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    imageVector = when(nfcResult.signatureVerification) {
+                        "SUCCESS" -> Icons.Default.VerifiedUser
+                        "FAILED" -> Icons.Default.Error
+                        else -> Icons.Default.Security
+                    },
+                    contentDescription = null,
+                    tint = when(nfcResult.signatureVerification) {
+                        "SUCCESS" -> Color(0xFF4CAF50)
+                        "FAILED" -> Color(0xFFF44336)
+                        else -> MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.size(24.dp)
+                )
+                
+                Text(
+                    text = "🔐 Dijital İmza ve Güvenlik",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            
+            Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+            
+            // Signature Status
+            NFCInfoItem(
+                icon = when(nfcResult.signatureVerification) {
+                    "SUCCESS" -> Icons.Default.CheckCircle
+                    "FAILED" -> Icons.Default.Cancel
+                    else -> Icons.Default.Help
+                },
+                label = "Dijital İmza Durumu",
+                value = when(nfcResult.signatureVerification) {
+                    "SUCCESS" -> "✅ Geçerli ve Doğrulandı"
+                    "FAILED" -> "❌ Geçersiz veya Hatalı"
+                    else -> "❓ Doğrulanmadı"
+                }
+            )
+            
+            // Basic signature info
+            if (nfcResult.digitalSignature.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Security,
+                    label = "E-İmza Mevcut",
+                    value = nfcResult.digitalSignature
+                )
+            }
+            
+            if (nfcResult.signatureAlgorithm.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.VpnKey,
+                    label = "Algoritma",
+                    value = nfcResult.signatureAlgorithm
+                )
+            }
+            
+            // Public Key Details
+            if (nfcResult.publicKeySize.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Lock,
+                    label = "Anahtar Boyutu",
+                    value = nfcResult.publicKeySize
+                )
+            }
+            
+            if (nfcResult.publicKeyFormat.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Code,
+                    label = "Anahtar Formatı",
+                    value = nfcResult.publicKeyFormat
+                )
+            }
+            
+            // SOD Information
+            if (nfcResult.sodPresent) {
+                NFCInfoItem(
+                    icon = Icons.Default.Verified,
+                    label = "Güvenlik Belgesi (SOD)",
+                    value = if (nfcResult.sodValid) "✅ Mevcut ve Geçerli" else "⚠️ Mevcut ama Geçersiz"
+                )
+                
+                if (nfcResult.sodSignatureAlgorithm.isNotEmpty()) {
+                    NFCInfoItem(
+                        icon = Icons.Default.Code,
+                        label = "SOD İmza Algoritması",
+                        value = nfcResult.sodSignatureAlgorithm
+                    )
+                }
+            }
+            
+            // Certificate Info
+            if (nfcResult.certificateIssuer.isNotEmpty()) {
+                NFCInfoItem(
+                    icon = Icons.Default.Badge,
+                    label = "Sertifika Türü",
+                    value = nfcResult.certificateIssuer
+                )
+            }
+            
+            // Verification Details
+            if (nfcResult.verificationDetails.isNotEmpty()) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "📄 Doğrulama Detayları:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = nfcResult.verificationDetails,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            
+
+            // Advanced Details (Expandable)
+            var showAdvancedDetails by remember { mutableStateOf(false) }
+            
+            TextButton(
+                onClick = { showAdvancedDetails = !showAdvancedDetails },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (showAdvancedDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (showAdvancedDetails) "Teknik Detayları Gizle" else "Teknik Detayları Göster",
+                    fontSize = 14.sp
+                )
+            }
+            
+            if (showAdvancedDetails) {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "⚙️ Teknik Bilgiler",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        
+                        if (nfcResult.publicKeyEncoded.isNotEmpty()) {
+                            Text(
+                                text = "Public Key (Hex): ${nfcResult.publicKeyEncoded}",
+                                fontSize = 11.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        if (nfcResult.dataGroupHashes.isNotEmpty()) {
+                            Text(
+                                text = "Data Group Hashes:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            
+                            nfcResult.dataGroupHashes.forEach { (dg, hash) ->
+                                Text(
+                                    text = "$dg: ${hash.take(32)}...",
+                                    fontSize = 10.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        
+                        Text(
+                            text = "Son Güncelleme: ${java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale("tr")).format(java.util.Date(nfcResult.lastVerificationTime))}",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            
+        }
+    }
+}
+
 // Helper function to format birth dates for display
 private fun formatBirthDateForDisplay(dateString: String): String {
     return try {
@@ -669,3 +871,4 @@ private fun formatExpiryDateForDisplay(dateString: String): String {
         dateString // Return original if formatting fails
     }
 }
+

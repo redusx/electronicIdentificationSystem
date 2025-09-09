@@ -1,7 +1,6 @@
 package com.example.countercamtest
 
 import android.Manifest
-import android.graphics.Matrix
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -14,36 +13,25 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import org.opencv.android.OpenCVLoader
 import java.util.concurrent.Executors
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import org.opencv.core.Point
-import org.opencv.core.Size
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import android.content.Intent
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     companion object {
-        const val TAG = "MainActivity"
         init { if (!OpenCVLoader.initLocal()) { OpenCVLoader.initDebug() } }
     }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -146,7 +134,7 @@ private fun CameraScreen(
             mainExecutor.execute {
                 // Analyzer devre dışıysa işlem yapma
                 if (!analyzerEnabled || mrzProcessed) {
-                    Log.d("MainActivity", "Analyzer disabled or MRZ already processed - skipping")
+                    Log.d("MainActivity", "🚫 Analyzer disabled($analyzerEnabled) or MRZ processed($mrzProcessed) - skipping")
                     return@execute
                 }
                 
@@ -154,7 +142,8 @@ private fun CameraScreen(
                 
                 // Kart tespit edildiğinde ve henüz MRZ işlemi yapılmadıysa
                 if (result.isValid && !cardDetected && !mrzProcessing && !mrzProcessed) {
-                    Log.i("MainActivity", "🎯 CARD DETECTED! Starting MRZ processing...")
+                    Log.i("MainActivity", "🎯 CARD DETECTED! States: cardDetected=$cardDetected, mrzProcessing=$mrzProcessing, mrzProcessed=$mrzProcessed")
+                    Log.i("MainActivity", "🚀 Starting MRZ processing...")
                     cardDetected = true
                     mrzProcessing = true
                     
@@ -172,17 +161,40 @@ private fun CameraScreen(
                             Log.i("MainActivity", "📋 Navigating to results...")
                             onMRZDetected(mrzResult)
                         } else {
+                            // MRZ başarısız olduğunda tüm state'leri reset et
+                            cardDetected = false
                             mrzProcessing = false
-                            Log.w("MainActivity", "MRZ read failed: ${mrzResult.errorMessage}")
+                            mrzProcessed = false
+                            
+                            Log.w("MainActivity", "MRZ read failed: ${mrzResult.errorMessage} - Resetting states for retry")
                         }
                     } ?: run {
+                        // MRZ data yoksa da state'leri reset et
+                        cardDetected = false
                         mrzProcessing = false
-                        Log.w("MainActivity", "No MRZ data available")
+                        mrzProcessed = false
+                        
+                        Log.w("MainActivity", "No MRZ data available - Resetting states for retry")
                     }
+                } else if (result.isValid) {
+                    // Valid kart var ama koşullar uygun değil
+                    Log.d("MainActivity", "📋 Valid card detected but conditions not met - States: cardDetected=$cardDetected, mrzProcessing=$mrzProcessing, mrzProcessed=$mrzProcessed")
                 }
             }
         }).also { 
             analyzerInstance = it
+        }
+    }
+
+    // Reset analyzer when analyzer instance is created
+    LaunchedEffect(analyzerInstance) {
+        analyzerInstance?.let {
+            Log.i("MainActivity", "🔄 Analyzer instance ready - Resetting state")
+            it.enableAnalysis()
+            analyzerEnabled = true
+            cardDetected = false
+            mrzProcessing = false
+            mrzProcessed = false
         }
     }
 
@@ -206,6 +218,20 @@ private fun CameraScreen(
         cameraProvider.unbindAll()
         val boundCamera = cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
         mainExecutor.execute { camera = boundCamera }
+    }
+
+    // MRZ processing timeout mekanizması
+    LaunchedEffect(mrzProcessing) {
+        if (mrzProcessing) {
+            delay(5000) // 5 saniye timeout
+            if (mrzProcessing && !mrzProcessed) {
+                Log.w("MainActivity", "⏰ MRZ processing timeout! Resetting states...")
+                cardDetected = false
+                mrzProcessing = false
+                mrzProcessed = false
+                analyzerEnabled = true
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
