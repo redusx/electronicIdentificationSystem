@@ -4,7 +4,8 @@ Bu proje, Türkiye Cumhuriyeti kimlik kartlarını ve benzeri standartlardaki be
 
 ## 📸 Temel Özellikler
 
-- **Gerçek Zamanlı Kart Tespiti**: Cihazın kamerasını kullanarak kimlik kartlarını anında tespit eder.
+- **Gerçek Zamanlı Kart Tespiti**: Mediapipe Object Detection ile genel kart tespiti ve takibi yapılır ve kimlik kartının uygun konumda bulunması doğrulanır.
+- **Kimlik Tanımlama Sistemi**: OpenCV ORB teknolojisi kullanılarak taratılan kartın T.C.Kimlik kartı validasyonu sağlanır.
 - **MRZ (Machine Readable Zone) Okuma**: Gelişmiş görüntü işleme (OpenCV) ve metin tanıma (ML Kit) teknikleriyle kimlik kartının altındaki MRZ alanını okur ve verileri (isim, belge no, tarihler vb.) çıkarır.
 - **NFC Çip Okuma**: MRZ'den elde edilen verileri kullanarak kimlik kartının çipine güvenli bir şekilde (BAC/PACE protokolleri ile) bağlanır.
 - **Veri Doğrulama**: NFC çipinden alınan yüksek çözünürlüklü fotoğraf (DG2) ve diğer kişisel bilgileri görüntüler.
@@ -14,11 +15,12 @@ Bu proje, Türkiye Cumhuriyeti kimlik kartlarını ve benzeri standartlardaki be
 
 1.  **Kamera Ekranı**: Kullanıcı uygulamayı açar ve kimlik kartını kameraya gösterir.
 2.  **Otomatik Tespit**: Uygulama, ekrandaki kartı otomatik olarak algılar.
-3.  **MRZ Okuma**: Kart algılandığında, MRZ alanı taranır ve bilgiler çıkarılır.
-4.  **MRZ Sonuç Ekranı**: Başarıyla okunan MRZ verileri kullanıcıya gösterilir.
-5.  **NFC Okumaya Geçiş**: Kullanıcı, bu ekrandaki "NFC Oku" butonu ile çip okuma işlemini başlatır.
-6.  **NFC Okuma Ekranı**: Kullanıcıdan kimlik kartını telefonun arkasındaki NFC antenine yaklaştırması istenir.
-7.  **NFC Sonuç Ekranı**: Çipten okunan veriler (fotoğraf dahil) ekranda görüntülenir.
+3.  **Kart Validasyonu**: Algılanan kartın uı overlay ile eşleşmesine bağlı olarak kart tanımlama sistemi çalışarak kartın validasyonu sağlanır.
+4.  **MRZ Okuma**: Kart doğrulandığında, MRZ alanı taranır ve bilgiler çıkarılır.
+5.  **MRZ Sonuç Ekranı**: Başarıyla okunan MRZ verileri kullanıcıya gösterilir.
+6.  **NFC Okumaya Geçiş**: Kullanıcı, bu ekrandaki "NFC Oku" butonu ile çip okuma işlemini başlatır.
+7.  **NFC Okuma Ekranı**: Kullanıcıdan kimlik kartını telefonun arkasındaki NFC antenine yaklaştırması istenir.
+8.  **NFC Sonuç Ekranı**: Çipten okunan veriler (fotoğraf dahil) ekranda görüntülenir.
 
 ## 🛠️ Kullanılan Teknolojiler ve Kütüphaneler
 
