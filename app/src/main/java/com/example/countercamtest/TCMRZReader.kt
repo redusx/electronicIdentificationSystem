@@ -7,6 +7,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.suspendCancellableCoroutine
+import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
 import org.opencv.core.*
 import org.opencv.imgproc.Imgproc
@@ -14,6 +15,7 @@ import org.json.JSONObject
 import java.util.regex.Pattern
 import kotlin.coroutines.resume
 import java.io.Serializable
+import java.util.concurrent.Executors
 
 /**
  * TC Kimlik Kartı MRZ OCR Entegrasyonu
@@ -41,11 +43,14 @@ class TCMRZReader(private val context: Context) {
         private const val MIN_HEIGHT = 600
     }
 
-    // MLKit Text Recognizer
-    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    // MLKit Text Recognizer with MRZ-optimized settings for better MRZ recognition
+    private val textRecognizer = TextRecognition.getClient(
+        TextRecognizerOptions.Builder()
+            .setExecutor(Executors.newSingleThreadExecutor()) // Dedicated thread for better performance
+            .build()
+    )
     
-    // Template-based MRZ detector (lazy initialization)
-    private val templateDetector by lazy { TemplateMRZDetector() }
+    // Template-based MRZ detector removed - using direct OCR on whole image
 
     // TC MRZ Data Structure
     data class TCMRZResult(
@@ -96,21 +101,147 @@ class TCMRZReader(private val context: Context) {
         val nationality: String = "TUR"
     ) : Serializable
 
+    // Light condition detection
+    enum class LightCondition {
+        VERY_LOW, LOW, NORMAL, HIGH
+    }
+
     init {
+        // Ensure OpenCV is initialized for image preprocessing
+        if (!OpenCVLoader.initLocal()) {
+            Log.w(TAG, "OpenCV local initialization failed, trying debug mode")
+            if (!OpenCVLoader.initDebug()) {
+                Log.e(TAG, "OpenCV initialization failed completely! Image preprocessing may not work.")
+            } else {
+                Log.i(TAG, "OpenCV initialized successfully in debug mode")
+            }
+        } else {
+            Log.i(TAG, "OpenCV initialized successfully in local mode")
+        }
+
         Log.i(TAG, "TC MRZ Reader initialized with MLKit")
+    }
+
+    /**
+     * Check if OpenCV is properly initialized
+     */
+    private fun isOpenCVAvailable(): Boolean {
+        return try {
+            // Try to create a simple Mat to test OpenCV functionality
+            val testMat = Mat()
+            testMat.release()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "OpenCV not available: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Analyze light conditions in the image to determine preprocessing strategy
+     */
+    private fun analyzeLightConditions(bitmap: Bitmap): LightCondition {
+        val pixels = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+
+        var totalBrightness = 0.0
+        for (pixel in pixels) {
+            val r = (pixel shr 16) and 0xff
+            val g = (pixel shr 8) and 0xff
+            val b = pixel and 0xff
+            // Luminance formula (ITU-R BT.709)
+            totalBrightness += 0.299 * r + 0.587 * g + 0.114 * b
+        }
+
+        val avgBrightness = totalBrightness / pixels.size
+
+        Log.d(TAG, "Average brightness: $avgBrightness")
+
+        return when {
+            avgBrightness < 50 -> {
+                Log.d(TAG, "Light condition: VERY_LOW")
+                LightCondition.VERY_LOW
+            }
+            avgBrightness < 100 -> {
+                Log.d(TAG, "Light condition: LOW")
+                LightCondition.LOW
+            }
+            avgBrightness < 180 -> {
+                Log.d(TAG, "Light condition: NORMAL")
+                LightCondition.NORMAL
+            }
+            else -> {
+                Log.d(TAG, "Light condition: HIGH")
+                LightCondition.HIGH
+            }
+        }
     }
 
 
     /**
-     * Ana MRZ okuma fonksiyonu
+     * Check if OCR text is suitable for MRZ processing
+     */
+    private fun isTextSuitableForMRZ(text: String): Boolean {
+        if (text.isEmpty()) return false
+
+        // MRZ için uygun karakter oranını kontrol et
+        val mrzChars = text.count { it in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<" }
+        val ratio = mrzChars.toFloat() / text.length
+        val isLongEnough = text.length > 30
+
+        Log.d(TAG, "MRZ suitability: length=${text.length}, mrzRatio=${String.format("%.2f", ratio)}, suitable=${ratio > 0.6 && isLongEnough}")
+
+        return ratio > 0.6 && isLongEnough
+    }
+
+    /**
+     * Multi-scale OCR approach for challenging conditions
+     */
+    private suspend fun performMultiScaleOCR(bitmap: Bitmap, lightCondition: LightCondition): String {
+        val scales = when (lightCondition) {
+            LightCondition.VERY_LOW -> listOf(1.5f, 2.0f, 1.2f)
+            LightCondition.LOW -> listOf(1.3f, 1.7f)
+            else -> listOf(1.2f)
+        }
+
+        Log.d(TAG, "Trying multi-scale OCR with scales: $scales")
+
+        for (scale in scales) {
+            try {
+                val scaledWidth = (bitmap.width * scale).toInt()
+                val scaledHeight = (bitmap.height * scale).toInt()
+
+                val scaledBitmap = Bitmap.createScaledBitmap(
+                    bitmap, scaledWidth, scaledHeight, true
+                )
+
+                val result = performMLKitOCR(scaledBitmap)
+                scaledBitmap.recycle()
+
+                if (isTextSuitableForMRZ(result)) {
+                    Log.d(TAG, "Multi-scale OCR successful at scale: $scale")
+                    return result
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Multi-scale OCR failed at scale $scale: ${e.message}")
+                continue
+            }
+        }
+
+        Log.w(TAG, "Multi-scale OCR failed at all scales")
+        return ""
+    }
+
+    /**
+     * Ana MRZ okuma fonksiyonu - Enhanced with adaptive processing
      */
     suspend fun readTCMRZ(inputBitmap: Bitmap, overlayBounds: android.graphics.Rect? = null): TCMRZResult {
         val startTime = System.currentTimeMillis()
-        
-        Log.d(TAG, "=== TC MRZ READING START (MLKit) ===")
+
+        Log.d(TAG, "=== TC MRZ READING START (Enhanced MLKit) ===")
 
         try {
-            
+
             // 1. Görüntü kalite kontrolü
             if (!validateImageQuality(inputBitmap)) {
                 return TCMRZResult(
@@ -123,25 +254,39 @@ class TCMRZReader(private val context: Context) {
                 )
             }
 
-            // 2. Try MLKit OCR first with original image (no preprocessing)
-            Log.d(TAG, "Testing MLKit OCR with original image first...")
+            // 2. Analyze light conditions first
+            val lightCondition = analyzeLightConditions(inputBitmap)
+            Log.d(TAG, "Detected light condition: $lightCondition")
+
+            // 3. Try MLKit OCR first with original image (no preprocessing)
+            Log.d(TAG, "Performing MLKit OCR on original image...")
             val originalOcrText = performMLKitOCR(inputBitmap)
-            
-            // 3. If original failed, try with preprocessed MRZ area
-            val ocrText = if (originalOcrText.isNotEmpty()) {
+
+            // 4. Evaluate original OCR result
+            var ocrText = ""
+            if (isTextSuitableForMRZ(originalOcrText)) {
                 Log.d(TAG, "Original image OCR succeeded, using result")
-                originalOcrText
+                ocrText = originalOcrText
             } else {
-                Log.d(TAG, "Original image OCR failed, trying with MRZ preprocessing...")
-                val preprocessedBitmap = preprocessImageForMRZ(inputBitmap, overlayBounds)
+                Log.d(TAG, "Original image OCR unsuitable, trying adaptive preprocessing...")
+
+                // 5. Apply light-condition adaptive preprocessing
+                val preprocessedBitmap = applyLowLightPreprocessing(inputBitmap, lightCondition)
                 val processedOcrText = performMLKitOCR(preprocessedBitmap)
-                
+
+                if (isTextSuitableForMRZ(processedOcrText)) {
+                    Log.d(TAG, "Adaptive preprocessing OCR succeeded")
+                    ocrText = processedOcrText
+                } else {
+                    Log.d(TAG, "Single-scale preprocessing failed, trying multi-scale approach...")
+                    // 6. Try multi-scale approach for challenging conditions
+                    ocrText = performMultiScaleOCR(preprocessedBitmap, lightCondition)
+                }
+
                 // Cleanup preprocessed bitmap if different from input
                 if (preprocessedBitmap != inputBitmap) {
                     preprocessedBitmap.recycle()
                 }
-                
-                processedOcrText
             }
             
             // 4. MRZ Format Doğrulama
@@ -198,158 +343,166 @@ class TCMRZReader(private val context: Context) {
         return width >= MIN_WIDTH && height >= MIN_HEIGHT
     }
 
-    private fun preprocessImageForMRZ(inputBitmap: Bitmap, overlayBounds: android.graphics.Rect? = null): Bitmap {
-        Log.d(TAG, "Starting simplified MRZ preprocessing pipeline")
-        
-        // Convert to OpenCV Mat
-        val inputMat = Mat()
-        Utils.bitmapToMat(inputBitmap, inputMat)
-        
-        // 1. Convert to grayscale
-        val grayMat = Mat()
-        if (inputMat.channels() > 1) {
-            Imgproc.cvtColor(inputMat, grayMat, Imgproc.COLOR_BGR2GRAY)
-        } else {
-            inputMat.copyTo(grayMat)
+    // MRZ region detection removed - using direct OCR on whole image
+
+    /**
+     * Advanced low-light preprocessing with adaptive parameters
+     * Optimized for different lighting conditions
+     */
+    private fun applyLowLightPreprocessing(inputBitmap: Bitmap, lightCondition: LightCondition): Bitmap {
+        Log.d(TAG, "Applying low-light preprocessing for condition: $lightCondition")
+
+        // Check if OpenCV is available before processing
+        if (!isOpenCVAvailable()) {
+            Log.w(TAG, "OpenCV not available, returning original bitmap without preprocessing")
+            return inputBitmap
         }
-        
-        // 2. Template-based MRZ Detection
-        val height = grayMat.rows()
-        val width = grayMat.cols()
-        
-        // Template matching ile gerçek MRZ konumunu bul
-        Log.d(TAG, "Input image size for template matching: ${width}x${height}")
-        val detectedPoint = templateDetector.detectMRZByTemplate(grayMat)
-        
-        val mrzRect = if (detectedPoint != null) {
-            // Template matching başarılı - tespit edilen konumu kullan
-            val templateWidth = 600
-            val templateHeight = 120
-            
-            // Tespit edilen nokta template'in sol üst köşesi
-            val mrzStartX = detectedPoint.x.toInt()
-            val mrzStartY = detectedPoint.y.toInt()
-            
-            // Template boyutlarını ekran boyutuna göre scale et - daha büyük area kullan
-            val scaleX = width.toDouble() / 2992.0 // Kamera çözünürlüğü referans
-            val scaleY = height.toDouble() / 2992.0
-            
-            val scaledWidth = (templateWidth * scaleX * 1.2).toInt() // %20 daha geniş
-            val scaledHeight = (templateHeight * scaleY * 1.5).toInt() // %50 daha yüksek
-            
-            Log.d(TAG, "Template MRZ detected at: $mrzStartX,$mrzStartY size ${scaledWidth}x${scaledHeight}")
-            
-            // Güvenlik marjinleri ekle
-            val safeStartX = maxOf(0, mrzStartX - 20)
-            val safeStartY = maxOf(0, mrzStartY - 15)
-            val safeWidth = minOf(width - safeStartX, scaledWidth + 40)
-            val safeHeight = minOf(height - safeStartY, scaledHeight + 30)
-            
-            android.graphics.Rect(safeStartX, safeStartY, safeStartX + safeWidth, safeStartY + safeHeight)
-        } else if (overlayBounds != null) {
-            // Template matching başarısız - overlay bounds kullan
-            Log.d(TAG, "Template detection failed, using overlay bounds")
-            
-            val overlayStartY = overlayBounds.top
-            val overlayHeight = overlayBounds.height()
-            val mrzStartY = overlayStartY + (overlayHeight * 0.80).toInt() // Biraz daha yukarıdan başla
-            val mrzHeight = (overlayHeight * 0.20).toInt() // Daha yüksek alan
-            
-            val mrzStartX = overlayBounds.left + (overlayBounds.width() * 0.05).toInt()
-            val mrzWidth = (overlayBounds.width() * 0.90).toInt()
-            
-            android.graphics.Rect(mrzStartX, mrzStartY, mrzStartX + mrzWidth, mrzStartY + mrzHeight)
-        } else {
-            // Fallback: genel tahmini alan - debug ile optimize edelim
-            Log.d(TAG, "No template detected, no overlay bounds - using estimated area")
-            
-            // Daha büyük alan kullan
-            val mrzStartY = (height * 0.85).toInt() // Alt %15'de ara
-            val mrzHeight = (height * 0.15).toInt() // %15 yükseklik
-            val mrzStartX = (width * 0.05).toInt() // %5 margin
-            val mrzWidth = (width * 0.90).toInt() // %90 genişlik
-            
-            Log.d(TAG, "Fallback MRZ area: startY=${mrzStartY}, height=${mrzHeight}, startX=${mrzStartX}, width=${mrzWidth}")
-            
-            android.graphics.Rect(mrzStartX, mrzStartY, mrzStartX + mrzWidth, mrzStartY + mrzHeight)
+
+        try {
+            val inputMat = Mat()
+            Utils.bitmapToMat(inputBitmap, inputMat)
+
+            // Convert to grayscale
+            val grayMat = Mat()
+            if (inputMat.channels() > 1) {
+                Imgproc.cvtColor(inputMat, grayMat, Imgproc.COLOR_BGR2GRAY)
+            } else {
+                inputMat.copyTo(grayMat)
+            }
+
+            // 1. Gamma Correction (especially for low light)
+            val gammaValue = when (lightCondition) {
+                LightCondition.VERY_LOW -> 0.4
+                LightCondition.LOW -> 0.6
+                else -> 1.0
+            }
+
+            val gammaCorrected = Mat()
+            if (gammaValue != 1.0) {
+                val lookupTable = Mat(1, 256, CvType.CV_8U)
+                val lutData = ByteArray(256)
+                for (i in 0..255) {
+                    val corrected = Math.pow(i / 255.0, gammaValue) * 255.0
+                    lutData[i] = corrected.coerceIn(0.0, 255.0).toInt().toByte()
+                }
+                lookupTable.put(0, 0, lutData)
+                Core.LUT(grayMat, lookupTable, gammaCorrected)
+                lookupTable.release()
+                Log.d(TAG, "Applied gamma correction: $gammaValue")
+            } else {
+                grayMat.copyTo(gammaCorrected)
+            }
+
+            // 2. Optimized CLAHE based on research (industry best practices)
+            val claheParams = when (lightCondition) {
+                LightCondition.VERY_LOW -> Pair(3.0, Size(8.0, 8.0))     // Research: clipLimit 2-3 optimal
+                LightCondition.LOW -> Pair(2.5, Size(8.0, 8.0))          // Research: tileGridSize (8,8) standard
+                LightCondition.NORMAL -> Pair(2.0, Size(8.0, 8.0))       // Research: clipLimit=2.0 most effective
+                LightCondition.HIGH -> Pair(2.0, Size(8.0, 8.0))         // Consistent with research findings
+            }
+
+            val clahe = Imgproc.createCLAHE(claheParams.first, claheParams.second)
+            val claheResult = Mat()
+            clahe.apply(gammaCorrected, claheResult)
+            Log.d(TAG, "Applied CLAHE: clipLimit=${claheParams.first}, tileSize=${claheParams.second}")
+
+            // 3. MRZ-Specific Morphological Operations (Research-based)
+            val morphProcessed = Mat()
+
+            // First: Blackhat morphological operation (reveals dark text on light background)
+            val blackhatKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(15.0, 3.0))
+            val blackhat = Mat()
+            Imgproc.morphologyEx(claheResult, blackhat, Imgproc.MORPH_BLACKHAT, blackhatKernel)
+
+            // Enhance the original with blackhat result
+            val enhanced = Mat()
+            Core.add(claheResult, blackhat, enhanced)
+
+            // Second: Opening (noise removal) with square kernel
+            val openKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+            val opened = Mat()
+            Imgproc.morphologyEx(enhanced, opened, Imgproc.MORPH_OPEN, openKernel)
+
+            // Third: Closing (gap filling) with rectangular kernel (width 3x height for MRZ)
+            val closeKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 3.0))
+            Imgproc.morphologyEx(opened, morphProcessed, Imgproc.MORPH_CLOSE, closeKernel)
+
+            Log.d(TAG, "Applied MRZ-specific morphological operations: blackhat + opening + closing")
+
+            // 4. Enhanced Noise Reduction (after morphological operations)
+            val denoised = Mat()
+            when (lightCondition) {
+                LightCondition.VERY_LOW, LightCondition.LOW -> {
+                    // Stronger denoising for low light
+                    Imgproc.bilateralFilter(morphProcessed, denoised, 9, 75.0, 75.0)
+                    Log.d(TAG, "Applied bilateral filter for noise reduction")
+                }
+                else -> {
+                    // Light denoising for normal light
+                    Imgproc.GaussianBlur(morphProcessed, denoised, Size(3.0, 3.0), 1.0)
+                    Log.d(TAG, "Applied Gaussian blur for light denoising")
+                }
+            }
+
+            // Cleanup morphological matrices
+            blackhat.release()
+            enhanced.release()
+            opened.release()
+            morphProcessed.release()
+            blackhatKernel.release()
+            openKernel.release()
+            closeKernel.release()
+
+            // 4. Adaptive Sharpening
+            val sharpened = Mat()
+            if (lightCondition != LightCondition.VERY_LOW) {
+                val blurred = Mat()
+                Imgproc.GaussianBlur(denoised, blurred, Size(3.0, 3.0), 1.0)
+                val mask = Mat()
+                Core.subtract(denoised, blurred, mask)
+
+                val sharpAmount = when (lightCondition) {
+                    LightCondition.LOW -> 0.3
+                    LightCondition.NORMAL -> 0.5
+                    LightCondition.HIGH -> 0.7
+                    else -> 0.0
+                }
+                Core.addWeighted(denoised, 1.0, mask, sharpAmount, 0.0, sharpened)
+
+                blurred.release()
+                mask.release()
+                Log.d(TAG, "Applied adaptive sharpening: amount=$sharpAmount")
+            } else {
+                denoised.copyTo(sharpened)
+                Log.d(TAG, "Skipped sharpening for very low light")
+            }
+
+            // Convert back to bitmap
+            val resultBitmap = Bitmap.createBitmap(sharpened.cols(), sharpened.rows(), Bitmap.Config.ARGB_8888)
+            Utils.matToBitmap(sharpened, resultBitmap)
+
+            // Cleanup
+            inputMat.release()
+            grayMat.release()
+            gammaCorrected.release()
+            claheResult.release()
+            denoised.release()
+            sharpened.release()
+
+            Log.d(TAG, "Low-light preprocessing completed successfully")
+            return resultBitmap
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in low-light preprocessing: ${e.message}", e)
+            return inputBitmap // Return original on error
         }
-        
-        Log.d(TAG, "Final MRZ area: ${mrzRect.left},${mrzRect.top} size ${mrzRect.width()}x${mrzRect.height()}")
-        
-        // OpenCV Rect'e çevir ve bounds kontrolü
-        val safeLeft = maxOf(0, mrzRect.left)
-        val safeTop = maxOf(0, mrzRect.top) 
-        val safeWidth = minOf(width - safeLeft, mrzRect.width())
-        val safeHeight = minOf(height - safeTop, mrzRect.height())
-        
-        val cvMrzRect = org.opencv.core.Rect(safeLeft, safeTop, safeWidth, safeHeight)
-        val mrzMat = Mat(grayMat, cvMrzRect)
-        
-        // ADVANCED PREPROCESSING - CLAHE + Unsharp Mask for improved OCR accuracy
-        Log.d(TAG, "Applying advanced preprocessing: CLAHE + Unsharp Mask")
-        
-        val enhancedMat = applyAdvancedPreprocessing(mrzMat)
-        
-        // Convert back to Bitmap
-        val resultBitmap = Bitmap.createBitmap(enhancedMat.cols(), enhancedMat.rows(), Bitmap.Config.ARGB_8888)
-        Utils.matToBitmap(enhancedMat, resultBitmap)
-        
-        Log.d(TAG, "MRZ preprocessing completed: ${resultBitmap.width}x${resultBitmap.height}")
-        
-        // Cleanup
-        inputMat.release()
-        grayMat.release()
-        mrzMat.release()
-        enhancedMat.release()
-        
-        return resultBitmap
     }
 
     /**
-     * Advanced image preprocessing using CLAHE and Unsharp Mask
-     * Improves OCR accuracy by enhancing contrast and sharpening text edges
+     * Legacy light preprocessing - kept for backward compatibility
      */
-    private fun applyAdvancedPreprocessing(inputMat: Mat): Mat {
-        Log.d(TAG, "Starting advanced preprocessing pipeline")
-        
-        try {
-            // 1. CLAHE (Contrast Limited Adaptive Histogram Equalization) - AGGRESSIVE
-            Log.d(TAG, "Applying AGGRESSIVE CLAHE for maximum contrast enhancement")
-            val clahe = Imgproc.createCLAHE(4.0, Size(4.0, 4.0)) // 2x daha agresif
-            val claheResult = Mat()
-            clahe.apply(inputMat, claheResult)
-            
-            // 2. Gaussian + Unsharp Mask for sharpening - AGGRESSIVE
-            Log.d(TAG, "Applying AGGRESSIVE Gaussian + Unsharp Mask for maximum sharpening")
-            
-            // Create Gaussian blurred version - daha büyük kernel
-            val blurred = Mat()
-            Imgproc.GaussianBlur(claheResult, blurred, Size(7.0, 7.0), 1.5) // Daha büyük blur
-            
-            // Create mask by subtracting blurred from original
-            val mask = Mat()
-            Core.subtract(claheResult, blurred, mask)
-            
-            // Apply unsharp mask: enhanced = original + amount * mask - MUCH STRONGER
-            val sharpened = Mat()
-            Core.addWeighted(claheResult, 1.0, mask, 3.0, 0.0, sharpened) // 1.5 -> 3.0 (2x güçlü)
-            
-            Log.d(TAG, "Advanced preprocessing completed successfully")
-            
-            // Cleanup intermediate results
-            claheResult.release()
-            blurred.release()
-            mask.release()
-            
-            return sharpened
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in advanced preprocessing: ${e.message}", e)
-            // Fallback: return original mat if preprocessing fails
-            val fallback = Mat()
-            inputMat.copyTo(fallback)
-            return fallback
-        }
+    private fun applyLightPreprocessing(inputBitmap: Bitmap): Bitmap {
+        return applyLowLightPreprocessing(inputBitmap, LightCondition.NORMAL)
     }
 
     private suspend fun performMLKitOCR(bitmap: Bitmap): String {
@@ -1130,120 +1283,7 @@ class TCMRZReader(private val context: Context) {
         return minOf(confidence, 100f)
     }
     
-    /**
-     * Template-based MRZ Detection
-     * MRZ pattern'ini template matching ile tespit eder
-     */
-    private inner class TemplateMRZDetector {
-        
-        fun detectMRZByTemplate(inputMat: Mat): Point? {
-            Log.d(TAG, "Starting multi-scale template-based MRZ detection")
-            
-            val gray = Mat()
-            if (inputMat.channels() > 1) {
-                Imgproc.cvtColor(inputMat, gray, Imgproc.COLOR_BGR2GRAY)
-            } else {
-                inputMat.copyTo(gray)
-            }
-            
-            // Multi-scale template matching
-            var bestMatch: Core.MinMaxLocResult? = null
-            var bestScale = 1.0
-            
-            val scales = arrayOf(0.5, 0.8, 1.0, 1.2, 1.5, 2.0) // Farklı scale'lerde dene
-            
-            for (scale in scales) {
-                val templateMat = createMRZTemplate()
-                
-                // Template'i scale et
-                val scaledTemplate = Mat()
-                val scaledSize = Size(templateMat.cols() * scale, templateMat.rows() * scale)
-                Imgproc.resize(templateMat, scaledTemplate, scaledSize)
-                
-                // Image boyutundan büyük template'ları skip et
-                if (scaledTemplate.cols() > gray.cols() || scaledTemplate.rows() > gray.rows()) {
-                    templateMat.release()
-                    scaledTemplate.release()
-                    continue
-                }
-                
-                // Template matching
-                val result = Mat()
-                try {
-                    Imgproc.matchTemplate(gray, scaledTemplate, result, Imgproc.TM_CCOEFF_NORMED)
-                    
-                    // En iyi eşleşmeyi bul
-                    val mmResult = Core.minMaxLoc(result)
-                    
-                    Log.d(TAG, "Scale $scale: Template confidence: ${String.format("%.3f", mmResult.maxVal)}")
-                    
-                    if (bestMatch == null || mmResult.maxVal > bestMatch.maxVal) {
-                        bestMatch = mmResult
-                        bestScale = scale
-                    }
-                    
-                    result.release()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Template matching failed for scale $scale: ${e.message}")
-                }
-                
-                templateMat.release()
-                scaledTemplate.release()
-            }
-            
-            val detectedPoint = if (bestMatch != null && bestMatch.maxVal > 0.2) { // %20 eşleşme eşiği
-                Log.d(TAG, "Best MRZ match: (${bestMatch.maxLoc.x}, ${bestMatch.maxLoc.y}) confidence=${String.format("%.3f", bestMatch.maxVal)} scale=${bestScale}")
-                bestMatch.maxLoc
-            } else {
-                Log.d(TAG, "MRZ template matching failed, best confidence: ${bestMatch?.maxVal ?: 0}")
-                Log.d(TAG, "Best match location: (${bestMatch?.maxLoc?.x}, ${bestMatch?.maxLoc?.y}) scale=$bestScale")
-                null
-            }
-            
-            // Cleanup
-            gray.release()
-            
-            return detectedPoint
-        }
-        
-        private fun createMRZTemplate(): Mat {
-            // TC MRZ template oluştur - daha gerçekçi pattern
-            // Gerçek boyutlar: 600x120 (daha büyük, daha net tespit için)
-            val template = Mat.zeros(Size(600.0, 120.0), CvType.CV_8UC1)
-            
-            // 3 satır MRZ için gerçekçi text pattern oluştur
-            for (lineIndex in 0..2) {
-                val y = 20 + lineIndex * 35 // Her satır arası 35 piksel
-                val lineHeight = 20 // Daha kalın satır yüksekliği
-                
-                // Sürekli text bloğu çiz (gerçek MRZ gibi)
-                Imgproc.rectangle(
-                    template,
-                    Point(30.0, y.toDouble()),
-                    Point(570.0, (y + lineHeight).toDouble()),
-                    Scalar(180.0), -1 // Gri ton, tam beyaz değil
-                )
-                
-                // Text içinde karakteristik boşluklar (< gibi)
-                for (spaceIndex in arrayOf(3, 8, 13, 19, 25)) { // Tipik MRZ boşluk pozisyonları
-                    val spaceX = 30 + spaceIndex * 18
-                    Imgproc.rectangle(
-                        template,
-                        Point(spaceX.toDouble(), (y + 3).toDouble()),
-                        Point((spaceX + 8).toDouble(), (y + lineHeight - 3).toDouble()),
-                        Scalar(120.0), -1 // Daha koyu ton
-                    )
-                }
-            }
-            
-            // Kenar yumuşatma
-            val blurred = Mat()
-            Imgproc.GaussianBlur(template, blurred, Size(5.0, 5.0), 2.0)
-            
-            template.release()
-            return blurred
-        }
-    }
+    // Template-based MRZ Detection removed - using direct OCR approach
 
     fun cleanup() {
         try {

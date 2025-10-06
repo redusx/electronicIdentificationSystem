@@ -1,5 +1,6 @@
 package com.example.countercamtest
 
+import android.util.Log
 import androidx.camera.core.Camera
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.geometry.RoundRect as ComposeRoundRect
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.nativeCanvas
 
 @Composable
 fun ScannerScreen(
@@ -37,7 +39,13 @@ fun ScannerScreen(
     segments: FloatArray? = null,
     srcWidth: Int = 0,
     srcHeight: Int = 0,
-    isCardDetected: Boolean = false
+    isCardDetected: Boolean = false,
+    onOverlayBoundsChanged: ((android.graphics.Rect) -> Unit)? = null,
+    // Yeni akış durumu parametreleri
+    isProcessingIdentity: Boolean = false,
+    isProcessingMRZ: Boolean = false,
+    identityValidated: Boolean = false,
+    mrzRetryCount: Int = 0
 ) {
     var flashEnabled by remember { mutableStateOf(false) }
 
@@ -64,27 +72,31 @@ fun ScannerScreen(
 
             CardOverlayContainer(
                 scanOffset = scanOffset,
-                isCardDetected = isCardDetected
+                isCardDetected = isCardDetected,
+                onOverlayBoundsChanged = onOverlayBoundsChanged,
+                isProcessingIdentity = isProcessingIdentity,
+                isProcessingMRZ = isProcessingMRZ,
+                identityValidated = identityValidated,
+                mrzRetryCount = mrzRetryCount
             )
 
             Spacer(modifier = Modifier.weight(0.5f))
 
-            // Flash controls disabled
-            // BottomControls(
-            //     flashEnabled = flashEnabled,
-            //     onFlashToggle = {
-            //         flashEnabled = !flashEnabled
-            //         camera?.cameraControl?.enableTorch(flashEnabled)
-            //     }
-            // )
+            // Controls removed - clean UI
         }
+
     }
 }
 
 @Composable
 private fun CardOverlayContainer(
     scanOffset: Float,
-    isCardDetected: Boolean = false
+    isCardDetected: Boolean = false,
+    onOverlayBoundsChanged: ((android.graphics.Rect) -> Unit)? = null,
+    isProcessingIdentity: Boolean = false,
+    isProcessingMRZ: Boolean = false,
+    identityValidated: Boolean = false,
+    mrzRetryCount: Int = 0
 ) {
 
 
@@ -101,26 +113,119 @@ private fun CardOverlayContainer(
         CardCanvas(
             scanOffset = scanOffset,
             isCardDetected = isCardDetected,
+            isProcessingIdentity = isProcessingIdentity,
+            identityValidated = identityValidated,
             modifier = Modifier.onGloballyPositioned { coords ->
                 cardOffset = coords.positionInRoot()
+                // Calculate overlay bounds and notify callback
+                val bounds = android.graphics.Rect(
+                    coords.positionInRoot().x.toInt(),
+                    coords.positionInRoot().y.toInt(),
+                    (coords.positionInRoot().x + coords.size.width).toInt(),
+                    (coords.positionInRoot().y + coords.size.height).toInt()
+                )
+                onOverlayBoundsChanged?.invoke(bounds)
             }
         )
         Spacer(modifier = Modifier.height(15.dp))
-        Text(
-            text = "TC Kimlik Kartı Arka Yüzünü Hizalayın",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 12.dp)
-        )
-        Text(
-            text = "Kartı çerçeve içinde tutun",
-            color = Color.White.copy(alpha = 0.8f),
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 2.dp)
-        )
+        // Dinamik durum mesajları
+        when {
+            isProcessingMRZ -> {
+                val (mrzText, mrzSubText) = when {
+                    mrzRetryCount > 0 -> Pair(
+                        "MRZ Bilgileri Okunuyor... (${mrzRetryCount}/3)",
+                        "Yeni görüntü ile deneniyor"
+                    )
+                    else -> Pair(
+                        "MRZ Bilgileri Okunuyor...",
+                        "Lütfen kartı sabit tutun"
+                    )
+                }
+                Text(
+                    text = mrzText,
+                    color = if (mrzRetryCount > 0) Color.Cyan else Color.Yellow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Text(
+                    text = mrzSubText,
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            isProcessingIdentity -> {
+                Text(
+                    text = "Kimlik Kartı Doğrulanıyor...",
+                    color = Color.Cyan,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Text(
+                    text = "Kart analiz ediliyor",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            identityValidated -> {
+                Text(
+                    text = "Kimlik Kartı Doğrulandı ✓",
+                    color = Color.Green,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Text(
+                    text = "MRZ verisi bekleniyor...",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            isCardDetected -> {
+                Text(
+                    text = "Kart Tespit Edildi!",
+                    color = Color.Green,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Text(
+                    text = "Kartı çerçeve içinde hizalayın",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+            else -> {
+                Text(
+                    text = "TC Kimlik Kartı Arka Yüzünü Hizalayın",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 12.dp)
+                )
+                Text(
+                    text = "Kartı çerçeve içinde tutun",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
     }
 }
 
@@ -128,7 +233,10 @@ private fun CardOverlayContainer(
 fun CardCanvas(
     scanOffset: Float,
     isCardDetected: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // ORB kimlik doğrulama durumları
+    isProcessingIdentity: Boolean = false,
+    identityValidated: Boolean = false
 ) {
     Box(
         modifier = modifier
@@ -140,29 +248,56 @@ fun CardCanvas(
             val cardHeight = size.height
             val corner = CornerRadius(cardWidth * 0.05f)
 
-            // Kart tespit edildiğinde yeşil arka plan, yoksa siyah
-            val backgroundColor = if (isCardDetected) Color.Green.copy(alpha = 0.3f) else Color.Black.copy(alpha = 0.2f)
-            val borderColor = if (isCardDetected) Color.Green else Color.White
+            // Durum bazında renk seçimi
+            val (backgroundColor, borderColor) = when {
+                identityValidated -> Pair(Color.Green.copy(alpha = 0.4f), Color.Green)
+                isProcessingIdentity -> Pair(Color.Cyan.copy(alpha = 0.3f), Color.Cyan)
+                isCardDetected -> Pair(Color.Yellow.copy(alpha = 0.3f), Color.Yellow)
+                else -> Pair(Color.Black.copy(alpha = 0.2f), Color.White)
+            }
 
             drawRoundRect(color = backgroundColor, size = size, cornerRadius = corner)
             drawRoundRect(color = borderColor, size = size, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
             
-            // Kart tespit edildiğinde animasyonu durdur
-            if (!isCardDetected) {
-                drawScanningAnimation(cardWidth, cardHeight, scanOffset)
+            // ORB kimlik doğrulama tamamlanana kadar animasyon devam eder
+            if (!identityValidated) {
+                drawScanningAnimation(
+                    cardWidth = cardWidth, 
+                    cardHeight = cardHeight, 
+                    scanOffset = scanOffset,
+                    isProcessingIdentity = isProcessingIdentity,
+                    isCardDetected = isCardDetected
+                )
             }
         }
     }
 }
 
 
-fun DrawScope.drawScanningAnimation(cardWidth: Float, cardHeight: Float, scanOffset: Float) {
+fun DrawScope.drawScanningAnimation(
+    cardWidth: Float, 
+    cardHeight: Float, 
+    scanOffset: Float,
+    isProcessingIdentity: Boolean = false,
+    isCardDetected: Boolean = false
+) {
     val gradientHeight = cardHeight * 0.4f
     val animatedY = scanOffset * (cardHeight - gradientHeight)
+    
+    // Durum bazında animasyon rengi
+    val animationColor = when {
+        isProcessingIdentity -> Color.Cyan // Kimlik doğrulanıyor
+        isCardDetected -> Color.Yellow // Kart tespit edildi
+        else -> Color.Green // Varsayılan tarama
+    }
+    
     val gradient = Brush.verticalGradient(
-        colors = listOf(Color.Transparent, Color(0xFF00FF00).copy(alpha = 0.2f), Color.Transparent),
+        colors = listOf(Color.Transparent, animationColor.copy(alpha = 0.3f), Color.Transparent),
         startY = animatedY,
         endY = animatedY + gradientHeight
     )
     drawRect(brush = gradient, topLeft = Offset(0f, animatedY), size = Size(cardWidth, gradientHeight))
 }
+
+
+

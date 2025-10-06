@@ -9,11 +9,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.countercamtest"
+        applicationId = "com.example.countercamdev"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +37,19 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // TensorFlow Lite model optimization
+    androidResources {
+        noCompress += "tflite"
+        noCompress += "lite"
+    }
+
+    // MediaPipe model assets - no compression for .tflite files
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
 }
 
 dependencies {
@@ -49,6 +62,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.material3)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -80,10 +94,12 @@ dependencies {
 
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
 
-    //implementation("org.openpnp:opencv:4.9.0-0")
+    // OpenCV needed for TCMRZReader (MRZ processing)
     implementation("org.opencv:opencv:4.9.0")
 
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    
+    // SmartBank Rectangle Detector removed - using MLKit Object Detection
 
     // --- NFC ve Kimlik Okuma Kütüphaneleri (tananaev projesinden) ---
 
@@ -109,9 +125,21 @@ dependencies {
     implementation("com.github.mhshams:jnbis:1.1.0")
 
 // 5. MLKit Text Recognition (Tesseract yerine)
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Updated to latest MLKit Text Recognition (research-based)
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
 
 // 6. Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.7.7")
+// Using MLKit Object Detection instead of SmartBank
+
+    // Camera and ML Kit dependencies
+    implementation("com.google.mlkit:object-detection:17.0.0")
+
+    implementation("androidx.camera:camera-extensions:1.3.1")
+    implementation("androidx.compose.runtime:runtime-livedata:1.5.8")
+
+    // MediaPipe Object Detection dependencies
+    implementation("com.google.mediapipe:tasks-vision:0.10.26")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
 }

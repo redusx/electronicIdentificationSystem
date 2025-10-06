@@ -19,12 +19,12 @@ class UnifiedMatchingValidator(private val context: Context) {
     companion object {
         private const val TAG = "UnifiedMatchingValidator"
 
-        // Enhanced matching parameters
-        private const val MIN_MATCHES_FOR_HOMOGRAPHY = 12
+        // Enhanced matching parameters - tightened for better accuracy
+        private const val MIN_MATCHES_FOR_HOMOGRAPHY = 15
         private const val HOMOGRAPHY_CONFIDENCE = 0.995
-        private const val HOMOGRAPHY_THRESHOLD = 3.0
-        private const val GOOD_MATCH_RATIO = 0.65f
-        private const val MIN_MATCH_COUNT = 8
+        private const val HOMOGRAPHY_THRESHOLD = 2.5
+        private const val GOOD_MATCH_RATIO = 0.60f
+        private const val MIN_MATCH_COUNT = 12
 
         // Resolution adaptation parameters
         private const val TARGET_REFERENCE_WIDTH = 1920.0
@@ -51,7 +51,7 @@ class UnifiedMatchingValidator(private val context: Context) {
     )
 
     private val matcher: DescriptorMatcher = DescriptorMatcher.create(DescriptorMatcher.BRUTEFORCE_HAMMING)
-    
+
     // TC MRZ Reader - professional implementation
     private val tcMrzReader: TCMRZReader by lazy { TCMRZReader(context) }
 
@@ -344,7 +344,7 @@ class UnifiedMatchingValidator(private val context: Context) {
                         tcMrzReader.readTCMRZ(inputBitmap, overlayBounds)
                     }
                     Log.d(TAG, "TC MRZ OCR completed: Success=${mrzData.success}, Confidence=${mrzData.confidence}%")
-                    
+
                     if (mrzData.success) {
                         Log.i(TAG, "TC MRZ Data extracted: ${mrzData.data?.surname} ${mrzData.data?.name}")
                     }
@@ -355,7 +355,7 @@ class UnifiedMatchingValidator(private val context: Context) {
 
             // Calculate confidence based on multiple factors
             val confidence = calculateUnifiedConfidence(goodMatches.size, homographyFound, scaleRatio, rotationAngle)
-            val isValid = goodMatches.size >= MIN_MATCH_COUNT && confidence > 0.3f
+            val isValid = goodMatches.size >= MIN_MATCH_COUNT && confidence > 0.6f
 
             // Cleanup
             inputMat.release()
@@ -400,6 +400,7 @@ class UnifiedMatchingValidator(private val context: Context) {
             )
         }
     }
+
 
     private fun calculateTransformationMetrics(matchedPoints: List<Pair<Point, Point>>): Pair<Double, Double> {
         if (matchedPoints.size < 2) return Pair(1.0, 0.0)
