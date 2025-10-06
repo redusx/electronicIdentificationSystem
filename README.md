@@ -52,6 +52,9 @@ Bu proje, Türkiye Cumhuriyeti kimlik kartlarını ve benzeri standartlardaki be
 4.  **Çalıştırın**:
     - Projeyi derlemek ve çalıştırmak için `Run 'app'` butonuna tıklayın.
     - **Önemli**: Uygulamanın tüm özelliklerini test edebilmek için **NFC özelliği olan fiziksel bir Android cihaz** kullanmanız gerekmektedir. Emülatörler NFC ve gelişmiş kamera özelliklerini desteklemez.
+4.  **Çalıştırın**:
+    - Projeyi derlemek ve çalıştırmak için `Run 'app'` butonuna tıklayın.
+    - **Önemli**: Uygulamanın tüm özelliklerini test edebilmek için **NFC özelliği olan fiziksel bir Android cihaz** kullanmanız gerekmektedir. Emülatörler NFC ve gelişmiş kamera özelliklerini desteklemez.
 
 ## 📂 Proje Yapısı
 
@@ -68,3 +71,16 @@ Projenin ana mantığı `app` modülü altında yer almaktadır. İşte önemli 
 ├── objectdetection/            # MediaPipe ile nesne tespiti için yardımcı sınıflar
 └── ui/                         # Jetpack Compose tema, renk ve tipografi ayarları
 ```
+
+
+![Uygulama Önizlemesi 1](1.jpeg)
+![Uygulama Önizlemesi 2](2.jpeg)
+![Uygulama Önizlemesi 3](3.jpeg)
+![Uygulama Önizlemesi 4](4.jpeg)
+![Uygulama Önizlemesi 5](5.jpeg)
+![Uygulama Önizlemesi 6](6.jpeg)
+![Uygulama Önizlemesi 7](7.jpeg)
+![Uygulama Önizlemesi 8](8.jpeg)
+![Uygulama Önizlemesi 9](9.jpeg)
+
+
